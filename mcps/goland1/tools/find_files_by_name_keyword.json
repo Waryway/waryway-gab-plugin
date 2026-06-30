@@ -1,0 +1,28 @@
+{
+  "name": "find_files_by_name_keyword",
+  "description": "Searches for all files in the project whose names contain the specified keyword (case-insensitive).\nUse this tool to locate files when you know part of the filename.\nNote: Matched only names, not paths, because works via indexes.\nNote: Only searches through files within the project directory, excluding libraries and external dependencies.\nNote: Prefer this tool over other `find` tools because it's much faster, \nbut remember that this tool searches only names, not paths and it doesn't support glob patterns.",
+  "inputSchema": {
+    "properties": {
+      "nameKeyword": {
+        "type": "string",
+        "description": "Substring to search for in file names"
+      },
+      "fileCountLimit": {
+        "type": "integer",
+        "description": "Maximum number of files to return."
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Timeout in milliseconds"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "nameKeyword"
+    ],
+    "type": "object"
+  }
+}

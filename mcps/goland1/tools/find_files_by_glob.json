@@ -1,0 +1,36 @@
+{
+  "name": "find_files_by_glob",
+  "description": "Searches for all files in the project whose relative paths match the specified glob pattern.\nThe search is performed recursively in all subdirectories of the project directory or a specified subdirectory.\nUse this tool when you need to find files by a glob pattern (e.g. '**/*.txt').",
+  "inputSchema": {
+    "properties": {
+      "globPattern": {
+        "type": "string",
+        "description": "Glob pattern to search for. The pattern must be relative to the project root. Example: `src/**/ *.java`"
+      },
+      "subDirectoryRelativePath": {
+        "type": "string",
+        "description": "Optional subdirectory relative to the project to search in."
+      },
+      "addExcluded": {
+        "type": "boolean",
+        "description": "Whether to add excluded/ignored files to the search results. Files can be excluded from a project either by user of by some ignore rules"
+      },
+      "fileCountLimit": {
+        "type": "integer",
+        "description": "Maximum number of files to return."
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Timeout in milliseconds"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "globPattern"
+    ],
+    "type": "object"
+  }
+}

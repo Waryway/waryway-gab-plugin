@@ -1,0 +1,49 @@
+{
+  "name": "execute_run_configuration",
+  "description": "Run either an existing run configuration by name or a temporary run configuration created from a code location\n(`filePath` + `line`) in the current project, then wait up to specified timeout for it to finish.\nUse this tool with either a configuration name returned by `get_run_configurations`, or with a run point\n(`filePath` + `line`) returned by `get_run_configurations(filePath = ...)`.\n\nOptional launch overrides (`programArguments`, `workingDirectory`, `envs`) are applied only for this run and are not persisted.\nDo not pass these override parameters unless you explicitly need to change the configured launch values for this run.\nMissing/null override parameters keep existing run configuration values unchanged.\nFor string overrides (`programArguments`, `workingDirectory`), missing/null or empty string (`\"\"`) keeps the existing value unchanged.\nPass a whitespace-only string such as `\" \"` to clear an existing value for this launch.\n\nPass either `configurationName`, or `filePath` together with `line`. These modes are mutually exclusive.\n\nBehavior:\n- When `waitForExit=true`, waits up to `timeout` milliseconds for process termination. If the timeout expires,\n  the process keeps running in the background and `exitCode` is omitted from the result.\n- When `waitForExit=false`, waits only for the process to start, then returns immediately without applying `timeout`.\n- `fullOutputPath` points to a temp file with the full raw output and may continue growing while the process is alive.\n\nReturns the execution result including current output snapshot, optional exit code, and optional `fullOutputPath`.",
+  "inputSchema": {
+    "properties": {
+      "configurationName": {
+        "type": "string",
+        "description": "Name of the existing run configuration to execute"
+      },
+      "filePath": {
+        "type": "string",
+        "description": "File path relative to the project root. Provide together with `line` to create and execute a temporary run configuration from code context."
+      },
+      "line": {
+        "type": "integer",
+        "description": "1-based line number for `filePath`. Provide together with `filePath` and do not combine with `configurationName`."
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Timeout in milliseconds"
+      },
+      "waitForExit": {
+        "type": "boolean",
+        "description": "Whether to wait for process termination. If false, the tool returns immediately after the process starts and ignores `timeout`."
+      },
+      "programArguments": {
+        "type": "string",
+        "description": "Optional program arguments override for this launch only. Missing/null or empty string keeps the existing value; whitespace-only string clears it."
+      },
+      "workingDirectory": {
+        "type": "string",
+        "description": "Optional working directory override for this launch only. Missing/null or empty string keeps the existing value; whitespace-only string clears it."
+      },
+      "envs": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Optional environment variable overrides for this launch only. Missing/null keeps existing env unchanged; when provided, values are merged over existing env."
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

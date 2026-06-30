@@ -1,0 +1,34 @@
+{
+  "name": "get_file_text_by_path",
+  "description": "        Retrieves the text content of a file using its path relative to project root.\n        Use this tool to read file contents when you have the file's project-relative path.\n        In the case of binary files, the tool returns an error.\n        If the file is too large, the text will be truncated with '<<<...content truncated...>>>' marker and in according to the `truncateMode` parameter.",
+  "inputSchema": {
+    "properties": {
+      "pathInProject": {
+        "type": "string",
+        "description": "Path relative to the project root"
+      },
+      "truncateMode": {
+        "type": "string",
+        "enum": [
+          "START",
+          "MIDDLE",
+          "END",
+          "NONE"
+        ],
+        "description": "How to truncate the text: from the start, in the middle, at the end, or don't truncate at all"
+      },
+      "maxLinesCount": {
+        "type": "integer",
+        "description": "Max number of lines to return. Truncation will be performed depending on truncateMode."
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "pathInProject"
+    ],
+    "type": "object"
+  }
+}

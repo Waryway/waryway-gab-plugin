@@ -1,0 +1,38 @@
+{
+  "name": "replace_text_in_file",
+  "description": "        Replaces text in a file with flexible options for find and replace operations.\n        Use this tool to make targeted changes without replacing the entire file content.\n        This is the most efficient tool for file modifications when you know the exact text to replace.\n        \n        Requires three parameters:\n        - pathInProject: The path to the target file, relative to project root\n        - oldTextOrPatte: The text to be replaced (exact match by default)\n        - newText: The replacement text\n        \n        Optional parameters:\n        - replaceAll: Whether to replace all occurrences (default: true)\n        - caseSensitive: Whether the search is case-sensitive (default: true)\n        - regex: Whether to treat oldText as a regular expression (default: false)\n        \n        Returns one of these responses:\n        - \"ok\" when replacement happened\n        - error \"project dir not found\" if project directory cannot be determined\n        - error \"file not found\" if the file doesn't exist\n        - error \"could not get document\" if the file content cannot be accessed\n        - error \"no occurrences found\" if the old text was not found in the file\n        \n        Note: Automatically saves the file after modification",
+  "inputSchema": {
+    "properties": {
+      "pathInProject": {
+        "type": "string",
+        "description": "Path to target file relative to project root"
+      },
+      "oldText": {
+        "type": "string",
+        "description": "Text to be replaced"
+      },
+      "newText": {
+        "type": "string",
+        "description": "Replacement text"
+      },
+      "replaceAll": {
+        "type": "boolean",
+        "description": "Replace all occurrences"
+      },
+      "caseSensitive": {
+        "type": "boolean",
+        "description": "Case-sensitive search"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "pathInProject",
+      "oldText",
+      "newText"
+    ],
+    "type": "object"
+  }
+}

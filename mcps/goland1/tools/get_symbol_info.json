@@ -1,0 +1,30 @@
+{
+  "name": "get_symbol_info",
+  "description": "Retrieves information about the symbol at the specified position in the specified file.\nProvides the same information as Quick Documentation feature of IntelliJ IDEA does.\n\nThis tool is useful for getting information about the symbol at the specified position in the specified file.\nThe information may include the symbol's name, signature, type, documentation, etc. It depends on a particular language.\n\nIf the position has a reference to a symbol the tool will return a piece of code with the declaration of the symbol if possible.\n\nUse this tool to understand symbols declaration, semantics, where it's declared, etc.",
+  "inputSchema": {
+    "properties": {
+      "filePath": {
+        "type": "string",
+        "description": "Path relative to the project root"
+      },
+      "line": {
+        "type": "integer",
+        "description": "1-based line number"
+      },
+      "column": {
+        "type": "integer",
+        "description": "1-based column number"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "filePath",
+      "line",
+      "column"
+    ],
+    "type": "object"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "reformat_file",
+  "description": "Reformats a specified file in the JetBrains IDE.\nUse this tool to apply code formatting rules to a file identified by its path.",
+  "inputSchema": {
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Path relative to the project root"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "path"
+    ],
+    "type": "object"
+  }
+}

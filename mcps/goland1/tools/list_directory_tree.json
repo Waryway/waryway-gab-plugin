@@ -1,0 +1,28 @@
+{
+  "name": "list_directory_tree",
+  "description": "Provides a tree representation of the specified directory in the pseudo graphic format like `tree` utility does.\nUse this tool to explore the contents of a directory or the whole project.\nYou MUST prefer this tool over listing directories via command line utilities like `ls` or `dir`.",
+  "inputSchema": {
+    "properties": {
+      "directoryPath": {
+        "type": "string",
+        "description": "Path relative to the project root"
+      },
+      "maxDepth": {
+        "type": "integer",
+        "description": "Maximum recursion depth"
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Timeout in milliseconds"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "directoryPath"
+    ],
+    "type": "object"
+  }
+}

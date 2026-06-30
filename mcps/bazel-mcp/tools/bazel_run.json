@@ -1,0 +1,20 @@
+{
+  "name": "bazel_run",
+  "description": "Run a Bazel command in the repository workspace. Bazel 9.0.1 is in use; only 'bazel mod' is accepted for dependency management — WORKSPACE-based commands are rejected. Examples: 'build //...', 'test //...', 'mod deps', 'mod graph', 'query //apps/...'.",
+  "inputSchema": {
+    "properties": {
+      "args": {
+        "description": "Space-separated Bazel arguments, e.g. 'build //...' or 'mod deps --depth=1'. Do NOT include the 'bazel' binary name itself.",
+        "type": "string"
+      },
+      "workspace_root": {
+        "description": "Absolute path to the Bazel workspace root. Defaults to the repo root detected via .bazelversion walk-up.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "args"
+    ],
+    "type": "object"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "name": "execute_terminal_command",
+  "description": "        Executes a specified shell command in the IDE's integrated terminal.\n        Use this tool to run terminal commands within the IDE environment.\n        Requires a command parameter containing the shell command to execute.\n        Important features and limitations:\n        - Checks if process is running before collecting output\n        - Limits output to 2000 lines (truncates excess)\n        - Times out after specified timeout with notification\n        - Requires user confirmation unless \"Brave Mode\" is enabled in settings\n        Returns possible responses:\n        - Terminal output (truncated if > 2000 lines)\n        - Output with interruption notice if timed out\n        - Error messages for various failure cases",
+  "inputSchema": {
+    "properties": {
+      "command": {
+        "type": "string",
+        "description": "Shell command to execute"
+      },
+      "executeInShell": {
+        "type": "boolean",
+        "description": "Whether to execute the command in a default user's shell (bash, zsh, etc.). \nUseful if the command is not a commandline but a shell script, or if it's important to preserve real environment of the user's terminal. \nIn the case of 'false' value the command will be started as a process"
+      },
+      "reuseExistingTerminalWindow": {
+        "type": "boolean",
+        "description": "Whether to reuse an existing terminal window. Allows to avoid creating multiple terminals"
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Timeout in milliseconds"
+      },
+      "maxLinesCount": {
+        "type": "integer",
+        "description": "Maximum number of lines to return"
+      },
+      "truncateMode": {
+        "type": "string",
+        "enum": [
+          "START",
+          "MIDDLE",
+          "END",
+          "NONE"
+        ],
+        "description": "How to truncate the text: from the start, in the middle, at the end, or don't truncate at all"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "command"
+    ],
+    "type": "object"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "rename_refactoring",
+  "description": "        Renames a symbol (variable, function, class, etc.) in the specified file.\n        Use this tool to perform rename refactoring operations. \n        \n        The `rename_refactoring` tool is a powerful, context-aware utility. Unlike a simple text search-and-replace, \n        it understands the code's structure and will intelligently update ALL references to the specified symbol throughout the project,\n        ensuring code integrity and preventing broken references. It is ALWAYS the preferred method for renaming programmatic symbols.\n\n        Requires three parameters:\n            - pathInProject: The relative path to the file from the project's root directory (e.g., `src/api/controllers/userController.js`)\n            - symbolName: The exact, case-sensitive name of the existing symbol to be renamed (e.g., `getUserData`)\n            - newName: The new, case-sensitive name for the symbol (e.g., `fetchUserData`).\n            \n        Returns a success message if the rename operation was successful.\n        Returns an error message if the file or symbol cannot be found or the rename operation failed.",
+  "inputSchema": {
+    "properties": {
+      "pathInProject": {
+        "type": "string",
+        "description": "Path relative to the project root"
+      },
+      "symbolName": {
+        "type": "string",
+        "description": "Name of the symbol to rename"
+      },
+      "newName": {
+        "type": "string",
+        "description": "New name for the symbol"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "pathInProject",
+      "symbolName",
+      "newName"
+    ],
+    "type": "object"
+  }
+}

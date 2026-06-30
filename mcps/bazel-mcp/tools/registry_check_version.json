@@ -1,0 +1,21 @@
+{
+  "name": "registry_check_version",
+  "description": "Check whether a specific module version exists in the Bazel Central Registry and whether it is compatible with Bazel 9.0.1.",
+  "inputSchema": {
+    "properties": {
+      "module": {
+        "description": "Module name, e.g. 'rules_go'",
+        "type": "string"
+      },
+      "version": {
+        "description": "SemVer string, e.g. '0.50.0'",
+        "type": "string"
+      }
+    },
+    "required": [
+      "module",
+      "version"
+    ],
+    "type": "object"
+  }
+}

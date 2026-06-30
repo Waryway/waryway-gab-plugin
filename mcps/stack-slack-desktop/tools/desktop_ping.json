@@ -1,0 +1,9 @@
+{
+  "name": "desktop_ping",
+  "description": "Health check for slack-agent desktop MCP skills. Returns a simple pong confirming the Windows desktop session is reachable from the agent.",
+  "inputSchema": {
+    "properties": {},
+    "required": [],
+    "type": "object"
+  }
+}

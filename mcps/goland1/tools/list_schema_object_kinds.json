@@ -1,0 +1,20 @@
+{
+  "name": "list_schema_object_kinds",
+  "description": "Retrieves supported schema object kinds (e.g., table, view, routine) for the given database connection.",
+  "inputSchema": {
+    "properties": {
+      "connectionId": {
+        "type": "string",
+        "description": "The unique ID of a database connection."
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "connectionId"
+    ],
+    "type": "object"
+  }
+}

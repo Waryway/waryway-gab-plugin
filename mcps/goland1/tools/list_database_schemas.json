@@ -1,0 +1,25 @@
+{
+  "name": "list_database_schemas",
+  "description": "Retrieves a list of database schemas in the specified database connection.",
+  "inputSchema": {
+    "properties": {
+      "connectionId": {
+        "type": "string",
+        "description": "The unique ID of a database connection."
+      },
+      "selectedOnly": {
+        "type": "boolean",
+        "description": "True to list only schemas with loaded metadata, false to list all schemas."
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "connectionId",
+      "selectedOnly"
+    ],
+    "type": "object"
+  }
+}

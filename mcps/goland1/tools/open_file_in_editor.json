@@ -1,0 +1,20 @@
+{
+  "name": "open_file_in_editor",
+  "description": "Opens the specified file in the JetBrains IDE editor.\nRequires a filePath parameter containing the path to the file to open.\nThe file path can be absolute or relative to the project root.",
+  "inputSchema": {
+    "properties": {
+      "filePath": {
+        "type": "string",
+        "description": "Path relative to the project root"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "filePath"
+    ],
+    "type": "object"
+  }
+}

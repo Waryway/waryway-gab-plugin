@@ -1,0 +1,14 @@
+{
+  "name": "get_project_dependencies",
+  "description": "Get a list of all dependencies defined in the project.\nReturns structured information about project library names.",
+  "inputSchema": {
+    "properties": {
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

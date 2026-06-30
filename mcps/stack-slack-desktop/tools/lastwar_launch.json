@@ -1,0 +1,14 @@
+{
+  "name": "lastwar_launch",
+  "description": "Launch (or focus) the Last War: Survival Game PC client if it is installed. Respects the lastwar_launcher_path from slack-agent config (with auto-probe of common FunFly AppData locations). Only available when BreakSandbox is enabled for the parent session. Returns launch status.",
+  "inputSchema": {
+    "properties": {
+      "force_restart": {
+        "description": "If true, attempt to terminate existing instances before launching.",
+        "type": "boolean"
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

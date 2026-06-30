@@ -1,0 +1,18 @@
+{
+  "name": "get_run_configurations",
+  "description": "Returns either project run configurations or executable code locations, depending on the input.\n\nWithout `filePath`, this tool lists the project's existing run configurations. The result includes configuration\nnames and, when available, launch details such as program arguments, working directory, environment variables,\nand `supportsDynamicLaunchOverrides`.\n\n`supportsDynamicLaunchOverrides` is the source-of-truth capability flag for one-time launch overrides\n(`programArguments`, `workingDirectory`, `envs`) in `execute_run_configuration` and `xdebug_start_debugger_session`.\nOnly pass those override parameters when this flag is `true` for the selected configuration.\n\nWith `filePath`, this tool discovers executable entry points (run points) in that file, such as test methods,\nmain methods, or other executable entry points where the IDE shows a Run gutter icon. The result contains `filePath` and\n`runPoints`; use the returned line numbers with `execute_run_configuration` to run from code.",
+  "inputSchema": {
+    "properties": {
+      "filePath": {
+        "type": "string",
+        "description": "Optional file path relative to the project root. When provided, returns run points (executable entry points) in the file instead of project-wide run configurations."
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

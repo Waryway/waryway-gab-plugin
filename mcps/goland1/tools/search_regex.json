@@ -1,0 +1,31 @@
+{
+  "name": "search_regex",
+  "description": "Searches for regex matches within project files.\nUse this tool when you need regex search with match coordinates.\nResults include match coordinates when available (1-based line/column, end exclusive).\n\nPaths are glob patterns relative to the project root.\nExamples: [\"src/**\", \"!**/test/**\"], [\"**/*.kt\"], [\"foo/\"].",
+  "inputSchema": {
+    "properties": {
+      "q": {
+        "type": "string",
+        "description": "Regex pattern to search for"
+      },
+      "paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional list of project-relative glob patterns to filter results. Supports '!' excludes. Trailing '/' expands to '**'. Patterns without '/' are treated as '**/pattern'. Empty strings are ignored."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum number of results to return"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "q"
+    ],
+    "type": "object"
+  }
+}

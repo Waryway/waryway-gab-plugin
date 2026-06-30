@@ -1,0 +1,21 @@
+{
+  "name": "gazelle_run",
+  "description": "Run Gazelle to generate or verify Bazel BUILD files. Gazelle is invoked via: bazel run @gazelle//:gazelle -- <mode>. Modes: 'update' (apply changes), 'diff' (show what would change, exits non-zero if dirty), 'fix' (apply fixes for deprecated constructs).",
+  "inputSchema": {
+    "properties": {
+      "extra_args": {
+        "description": "Optional extra arguments passed after the mode flag, e.g. '-go_prefix github.com/Waryway/stack'",
+        "type": "string"
+      },
+      "mode": {
+        "description": "One of: update (default), diff, fix",
+        "type": "string"
+      },
+      "workspace_root": {
+        "description": "Absolute path to the Bazel workspace root. Defaults to auto-detected repo root.",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

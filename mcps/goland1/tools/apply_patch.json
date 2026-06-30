@@ -1,0 +1,22 @@
+{
+  "name": "apply_patch",
+  "description": "        Apply a patch using the Codex apply_patch format or unified git diff format.\n        Supports Add, Delete, and Update operations with optional Move to path for updates.\n        Paths must stay inside the project directory.",
+  "inputSchema": {
+    "properties": {
+      "input": {
+        "type": "string",
+        "description": "Patch text in the apply_patch format or unified git diff format."
+      },
+      "patch": {
+        "type": "string",
+        "description": "Alias of `input` for compatibility with clients that send `{patch: ...}`."
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

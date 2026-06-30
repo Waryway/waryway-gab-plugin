@@ -1,0 +1,14 @@
+{
+  "name": "desktop_screenshot",
+  "description": "Capture a screenshot of the full desktop (or targeted Last War window). Returns a local path under .slack-agent/screenshots/. The agent can emit <<slack-file path=\"...\">> (or the skill response suggests it) to trigger upload to the Slack thread. Requires the Slack app bot token to have the 'files:write' scope + reinstall. Requires BreakSandbox for the session.",
+  "inputSchema": {
+    "properties": {
+      "target": {
+        "description": "One of: full_desktop (default), lastwar_window",
+        "type": "string"
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "execute_sql_query",
+  "description": "Executes a SQL query against the given database connection.\nDo not use this tool for DDL data sources as they have no underlying DBMS connection.\nReports execution status (success/error) with error details when applicable.\nReturns query results in CSV format, if any.",
+  "inputSchema": {
+    "properties": {
+      "connectionId": {
+        "type": "string",
+        "description": "The unique ID of a database connection."
+      },
+      "databaseName": {
+        "type": "string",
+        "description": "Name of the database the schema belongs to. Might be empty if DBMS has no databases, but only schemas.\nTogether with `schemaName` property forms qualified schema name that uniquely identifies the schema within the connection."
+      },
+      "schemaName": {
+        "type": "string",
+        "description": "Name of the schema."
+      },
+      "queryText": {
+        "type": "string",
+        "description": "SQL query to be executed."
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "connectionId",
+      "databaseName",
+      "schemaName",
+      "queryText"
+    ],
+    "type": "object"
+  }
+}

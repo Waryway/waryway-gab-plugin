@@ -1,0 +1,29 @@
+{
+  "name": "build_project",
+  "description": "Triggers building of the project or specified files, waits for completion, and returns build errors.\nUse this tool to build the project or compile files and get detailed information about compilation errors and warnings.\nYou have to use this tool after performing edits to validate if the edits are valid.",
+  "inputSchema": {
+    "properties": {
+      "rebuild": {
+        "type": "boolean",
+        "description": "Whether to perform full rebuild the project. Defaults to false. Effective only when `filesToRebuild` is not specified."
+      },
+      "filesToRebuild": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "If specified, only compile files with the specified paths. Paths are relative to the project root."
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Timeout in milliseconds"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

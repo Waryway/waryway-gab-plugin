@@ -1,0 +1,24 @@
+{
+  "name": "generate_inspection_kts_api",
+  "description": "    Returns the Inspection KTS API documentation for the target language.\n    Provides available classes and functions that can be used when writing inspection.kts files.",
+  "inputSchema": {
+    "properties": {
+      "language": {
+        "type": "string",
+        "description": "Target language: 'Java' or 'Kotlin'"
+      },
+      "wrapInTags": {
+        "type": "boolean",
+        "description": "If true, wraps the API content in <API> and <api.kt> tags"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "language"
+    ],
+    "type": "object"
+  }
+}

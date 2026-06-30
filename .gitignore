@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+.intellijPlatform/
+terminals/
+agent-tools/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Sandbox used by runIde
+build/.sandbox/
+
+# Misc
+*.log
+*.swp
+*~

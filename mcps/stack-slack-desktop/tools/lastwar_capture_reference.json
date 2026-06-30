@@ -1,0 +1,16 @@
+{
+  "name": "lastwar_capture_reference",
+  "description": "Phase 0 calibration helper. Focuses Last War (if present) and saves a cropped (or full-desktop fallback) screenshot as a named reference under .slack-agent/lastwar/refs/. Use names like 'claim_button' or 'barracks'. Overwrites a latest-<name>.png convenience pointer. Requires BreakSandbox. Returns paths for later locator use.",
+  "inputSchema": {
+    "properties": {
+      "name": {
+        "description": "Logical element name for the reference (e.g. 'claim_all', 'train_infantry')",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "type": "object"
+  }
+}

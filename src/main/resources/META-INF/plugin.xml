@@ -1,0 +1,50 @@
+<idea-plugin>
+    <id>com.waryway.gab</id>
+    <name>Waryway Agent</name>
+    <vendor url="https://waryway.com">Waryway</vendor>
+
+    <description><![CDATA[
+        <p>Waryway Agent — an agentic AI coding sidebar for JetBrains IDEs (GoLand first).</p>
+        <p>Chat with powerful models (Grok, GPT, Claude, and more via Gab AI) directly inside your IDE. Select models and thinking modes, attach workspace context, and let the agent read, search, edit, and build your project.</p>
+        <p>Requires a Gab AI Plus subscription for API access.</p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <p>Renamed to Waryway Agent. Grok models (grok-4.3, grok-4, grok-3, grok-build-0.1) are first-class defaults. Consolidated copyable agent output.</p>
+    ]]></change-notes>
+
+    <!-- Minimum 2024.3 (build 243) -->
+    <idea-version since-build="243" />
+
+    <depends>com.intellij.modules.platform</depends>
+    <!-- Optional: enable deeper language support when needed -->
+    <!-- <depends>com.intellij.modules.lang</depends> -->
+
+    <resource-bundle>messages.WarywayGabBundle</resource-bundle>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Right-side Tool Window -->
+        <toolWindow
+                id="Waryway Agent"
+                anchor="right"
+                factoryClass="com.waryway.gab.ui.WarywayGabToolWindowFactory"
+                icon="AllIcons.Toolwindows.ToolWindowMessages"
+                canCloseContents="false"
+                doNotActivateOnStart="false" />
+
+        <!-- Settings -->
+        <applicationConfigurable
+                parentId="tools"
+                instance="com.waryway.gab.settings.WarywayGabConfigurable"
+                id="com.waryway.gab.settings.WarywayGabConfigurable"
+                displayName="Waryway Agent"
+                nonDefaultProject="true" />
+
+        <!-- Application service for settings / client state -->
+        <applicationService serviceImplementation="com.waryway.gab.settings.WarywayGabSettings" />
+    </extensions>
+
+    <actions>
+        <!-- Future: toolbar actions, e.g. "New Agent Chat" -->
+    </actions>
+</idea-plugin>

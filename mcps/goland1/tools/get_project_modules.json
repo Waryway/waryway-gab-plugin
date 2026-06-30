@@ -1,0 +1,14 @@
+{
+  "name": "get_project_modules",
+  "description": "Get a list of all modules in the project with their types.\nReturns structured information about each module including name and type.",
+  "inputSchema": {
+    "properties": {
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

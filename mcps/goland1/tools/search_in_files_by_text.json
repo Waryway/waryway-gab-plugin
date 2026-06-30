@@ -1,0 +1,40 @@
+{
+  "name": "search_in_files_by_text",
+  "description": "Searches for a text substring within all files in the project using IntelliJ's search engine.\nPrefer this tool over reading files with command-line tools because it's much faster.\n\nThe result occurrences are surrounded with `||` characters, e.g. `some text ||substring|| text`",
+  "inputSchema": {
+    "properties": {
+      "searchText": {
+        "type": "string",
+        "description": "Text substring to search for"
+      },
+      "directoryToSearch": {
+        "type": "string",
+        "description": "Directory to search in, relative to project root. If not specified, searches in the entire project."
+      },
+      "fileMask": {
+        "type": "string",
+        "description": "File mask to search for. If not specified, searches for all files. Example: `*.java`"
+      },
+      "caseSensitive": {
+        "type": "boolean",
+        "description": "Whether to search for the text in a case-sensitive manner"
+      },
+      "maxUsageCount": {
+        "type": "integer",
+        "description": "Maximum number of entries to return."
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Timeout in milliseconds"
+      },
+      "projectPath": {
+        "type": "string",
+        "description": " The project path. Pass this value ALWAYS if you are aware of it. It reduces numbers of ambiguous calls. \n In the case you know only the current working directory you can use it as the project path.\n If you're not aware about the project path you can ask user about it."
+      }
+    },
+    "required": [
+      "searchText"
+    ],
+    "type": "object"
+  }
+}

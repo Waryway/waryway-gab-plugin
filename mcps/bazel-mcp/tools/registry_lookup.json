@@ -1,0 +1,16 @@
+{
+  "name": "registry_lookup",
+  "description": "Look up a module in the Bazel Central Registry (registry.bazel.build). Returns all published versions and flags versions known to be compatible with Bazel 9.",
+  "inputSchema": {
+    "properties": {
+      "module": {
+        "description": "Module name, e.g. 'rules_go' or 'gazelle'",
+        "type": "string"
+      }
+    },
+    "required": [
+      "module"
+    ],
+    "type": "object"
+  }
+}

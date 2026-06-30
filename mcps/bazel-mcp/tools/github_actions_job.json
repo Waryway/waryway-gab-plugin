@@ -1,0 +1,30 @@
+{
+  "name": "github_actions_job",
+  "description": "Fetch metadata and logs for a GitHub Actions job. Requires GITHUB_TOKEN env var with repo scope (or public_repo for public repos). Pass job_id from the Actions URL (e.g. .../job/82370150963).",
+  "inputSchema": {
+    "properties": {
+      "include_logs": {
+        "description": "Download job log text (default true)",
+        "type": "boolean"
+      },
+      "job_id": {
+        "description": "Numeric GitHub Actions job ID",
+        "type": "number"
+      },
+      "owner": {
+        "description": "GitHub org or user, e.g. Waryway",
+        "type": "string"
+      },
+      "repo": {
+        "description": "Repository name, e.g. stack",
+        "type": "string"
+      }
+    },
+    "required": [
+      "owner",
+      "repo",
+      "job_id"
+    ],
+    "type": "object"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "lastwar_perform_action",
+  "description": "Perform a named Last War action from the supported set (claim_all, collect_resources, train_troops, upgrade_building, send_march, claim_rewards, participate_event, get_state, ...). Uses improved window focus + lastwar_window rect capture for before/after. Returns text + paths to before/after screenshots.",
+  "inputSchema": {
+    "properties": {
+      "action": {
+        "description": "Action name, e.g. 'claim_all' or 'train_troops'",
+        "type": "string"
+      }
+    },
+    "required": [
+      "action"
+    ],
+    "type": "object"
+  }
+}

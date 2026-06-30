@@ -1,0 +1,19 @@
+{
+  "name": "lastwar_player_run",
+  "description": "Run a bounded 'player' loop for a goal (e.g. 'maximize dailies'). Performs a sequence of actions with (window-cropped when possible) screenshots. max_steps optional (capped). Foundation for regular duties and operational automation.",
+  "inputSchema": {
+    "properties": {
+      "goal": {
+        "type": "string"
+      },
+      "max_steps": {
+        "description": "How many action steps to attempt (default 5, max 20)",
+        "type": "number"
+      }
+    },
+    "required": [
+      "goal"
+    ],
+    "type": "object"
+  }
+}
