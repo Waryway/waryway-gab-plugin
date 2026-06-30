@@ -29,9 +29,10 @@ From Gradle tool window:
 - You can install it via Settings → Plugins → Install Plugin from Disk...
 
 ## Notes
-- The `mcps/goland1` folder documents JetBrains MCP tool shapes; the plugin implements equivalent tools natively via IntelliJ APIs.
-- **Cloud providers** send IDE tools via function calling (`read_file`, `search_text`, `replace_text_in_file`, `write_file`, `run_shell_command`, etc.).
-- **Local LLM** talks to `http://127.0.0.1:7400/v1` (OpenAI-compatible). Uses the `goland` prompt preset; chat mode without tool schema to fit small GGUF models.
+- **GoLand MCP Server is required for IDE tools.** Enable it: Settings → Tools → MCP Server → Enable MCP Server. Optional: enable brave mode for terminal commands without confirmation.
+- The plugin calls the built-in MCP HTTP API (`http://127.0.0.1:{port}/api/mcp/*`). Tool schemas are loaded live from `list_tools`, with `mcps/goland1/tools/*.json` as fallback.
+- **Cloud providers** (Grok, Gab AI) use MCP tools via function calling when the MCP server is reachable.
+- **Local LLM** talks to `http://127.0.0.1:7400/v1` (OpenAI-compatible). Uses the `gab-chat` preset. MCP tools are off by default for local models — enable in Settings → Waryway Agent → "Enable MCP tools for Local LLM".
 - Grok uses `https://api.x.ai/v1`. Gab AI uses `https://gab.ai/v1`.
 - Streaming SSE and skills are still planned (see UPDATED_PLAN.md).
 

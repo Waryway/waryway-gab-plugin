@@ -46,6 +46,12 @@ tasks {
         gradleVersion = "9.0"
     }
 
+    processResources {
+        from("mcps/goland1/tools") {
+            into("goland-mcp/tools")
+        }
+    }
+
     patchPluginXml {
         sinceBuild = "243"
         untilBuild = provider { null }

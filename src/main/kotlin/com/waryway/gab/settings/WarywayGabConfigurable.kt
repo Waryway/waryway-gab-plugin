@@ -149,6 +149,34 @@ class WarywayGabConfigurable : BoundConfigurable("Waryway Agent") {
 
             separator()
 
+            group("GoLand MCP Server") {
+                row("IDE MCP Port (0 = auto):") {
+                    intTextField(IntRange(0, 65535))
+                        .bindIntText(
+                            { settings.golandMcpIdePort },
+                            { settings.golandMcpIdePort = it }
+                        )
+                }
+                row {
+                    comment(
+                        "Enable Settings → Tools → MCP Server in GoLand. Port auto-scans 63342–63352 " +
+                            "(or IDE_PORT env). Agent tools call the built-in MCP HTTP API."
+                    )
+                }
+                row {
+                    checkBox("Enable MCP tools for Local LLM")
+                        .bindSelected(
+                            { settings.localLlmUseMcpTools },
+                            { settings.localLlmUseMcpTools = it }
+                        )
+                }
+                row {
+                    comment("Off by default — small local models often mishandle tool_calls.")
+                }
+            }
+
+            separator()
+
             row("Active Provider:") {
                 comboBox(ModelProvider.selectable.map { it.displayName })
                     .bindItem(

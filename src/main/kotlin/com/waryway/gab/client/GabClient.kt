@@ -77,6 +77,7 @@ class GabClient(
         model: String,
         messages: List<ChatMessage>,
         toolsJson: String = "",
+        includeTools: Boolean = provider != ModelProvider.LOCAL_LLM,
         presetOverride: String? = null,
         onStreamDelta: ((String) -> Unit)? = null,
         cancelled: () -> Boolean = { false }
@@ -85,7 +86,7 @@ class GabClient(
         repeat(MAX_RETRIES) { attempt ->
             try {
                 return@withContext chatCompletionStreaming(
-                    model, messages, toolsJson, presetOverride, onStreamDelta, cancelled
+                    model, messages, toolsJson, includeTools, presetOverride, onStreamDelta, cancelled
                 )
             } catch (e: GabApiException) {
                 lastError = e
@@ -104,6 +105,7 @@ class GabClient(
         model: String,
         messages: List<ChatMessage>,
         toolsJson: String,
+        includeTools: Boolean,
         presetOverride: String?,
         onStreamDelta: ((String) -> Unit)?,
         cancelled: () -> Boolean
@@ -113,7 +115,7 @@ class GabClient(
             messages = messages,
             stream = true,
             toolsJson = toolsJson,
-            includeTools = provider != ModelProvider.LOCAL_LLM,
+            includeTools = includeTools,
             presetOverride = presetOverride
         )
 

@@ -38,6 +38,9 @@ class WarywayGabSettings : PersistentStateComponent<WarywayGabSettings.State> {
         var localLlmContextCompaction: Boolean = true,
         var localLlmContextTokens: Int = 4096,
         var localLlmKeepRecentTurns: Int = 4,
+        /** 0 = auto-discover IDE MCP port (63342–63352). */
+        var golandMcpIdePort: Int = 0,
+        var localLlmUseMcpTools: Boolean = false,
         /** Legacy single-provider fields — migrated on load. */
         var defaultModel: String = "",
         var lastUsedModel: String = ""
@@ -101,6 +104,14 @@ class WarywayGabSettings : PersistentStateComponent<WarywayGabSettings.State> {
     var localLlmKeepRecentTurns: Int
         get() = myState.localLlmKeepRecentTurns.coerceIn(1, 12)
         set(value) { myState.localLlmKeepRecentTurns = value.coerceIn(1, 12) }
+
+    var golandMcpIdePort: Int
+        get() = myState.golandMcpIdePort.coerceIn(0, 65535)
+        set(value) { myState.golandMcpIdePort = value.coerceIn(0, 65535) }
+
+    var localLlmUseMcpTools: Boolean
+        get() = myState.localLlmUseMcpTools
+        set(value) { myState.localLlmUseMcpTools = value }
 
     fun getDefaultModel(provider: ModelProvider = activeProvider): String = when (provider) {
         ModelProvider.GAB_AI -> myState.gabDefaultModel

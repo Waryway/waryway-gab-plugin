@@ -5,7 +5,8 @@ import com.waryway.gab.client.GabClient
 import com.waryway.gab.diagnostics.SessionLog
 import com.waryway.gab.model.ChatMessage
 import com.waryway.gab.model.Usage
-import com.waryway.gab.tools.IdeToolExecutor
+import com.waryway.gab.settings.WarywayGabSettings
+import com.waryway.gab.tools.GolandMcpExecutor
 import com.waryway.gab.tools.ToolRegistry
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -31,10 +32,23 @@ class AgentSession(
 
     suspend fun run(model: String, messages: MutableList<ChatMessage>): Result {
         val localLlm = client.provider == com.waryway.gab.model.ModelProvider.LOCAL_LLM
+        val settings = WarywayGabSettings.getInstance()
+        val mcpExecutor = GolandMcpExecutor(project, settings)
+        val mcpAvailable = mcpExecutor.isAvailable()
+        val includeTools = mcpAvailable && (!localLlm || settings.localLlmUseMcpTools)
+        val toolsJson = if (includeTools) ToolRegistry.openAiToolsJson(project) else ""
+
         sessionLog?.system(
             "agent start model=$model provider=${client.provider.displayName} " +
-                "messages=${messages.size}${presetOverride?.let { " preset=$it" }.orEmpty()}"
+                "messages=${messages.size}${presetOverride?.let { " preset=$it" }.orEmpty()} " +
+                "mcp=${if (mcpAvailable) "on" else "off"} tools=${if (includeTools) "on" else "off"}"
         )
+        if (!mcpAvailable) {
+            sessionLog?.error(
+                "GoLand MCP Server not reachable — enable Settings → Tools → MCP Server. " +
+                    "Agent will run without IDE tools."
+            )
+        }
         if (localLlm) {
             prepareLocalLlmMessages(messages)
             sessionLog?.system("local LLM: system prompt omitted, project context in user turn")
@@ -62,7 +76,8 @@ class AgentSession(
             val response = client.chatCompletion(
                 model = model,
                 messages = messages,
-                toolsJson = ToolRegistry.openAiToolsJson(),
+                toolsJson = toolsJson,
+                includeTools = includeTools,
                 presetOverride = presetOverride,
                 onStreamDelta = { delta ->
                     if (!cancelled.get()) onStreamDelta(delta)
@@ -79,7 +94,6 @@ class AgentSession(
                 )
                 messages.add(assistantMsg)
 
-                val executor = IdeToolExecutor(project)
                 for (toolCall in response.toolCalls) {
                     if (cancelled.get()) break
 
@@ -87,7 +101,7 @@ class AgentSession(
                     val toolLine = "▸ ${toolCall.name}(${summarizeArgs(toolCall.arguments)})"
                     sessionLog?.tool(toolLine.removePrefix("▸ ").trim())
                     onStatus(toolLine)
-                    val result = executor.execute(toolCall.name, toolCall.arguments)
+                    val result = mcpExecutor.execute(toolCall.name, toolCall.arguments)
                     val resultLine = "  → ${summarizeResult(result)}"
                     sessionLog?.tool(resultLine.trim())
                     onStatus(resultLine)
