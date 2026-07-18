@@ -1,0 +1,23 @@
+{
+  "project_slug": "improve-grok-build-interaction",
+  "section_id": "section-05-regression-ship",
+  "iteration": 1,
+  "status": "VERIFIER_DONE",
+  "type": "build-test",
+  "updated_by": "manager-section-05-regression-ship",
+  "notes": "Checkpoint: full suite green; no scoped fallback needed. Section SECTION_DONE.",
+  "command_preferred": "./gradlew.bat test",
+  "command_fallback": "./gradlew.bat test --tests com.waryway.gab.client.* --tests com.waryway.gab.chat.* --tests com.waryway.gab.ui.* --tests com.waryway.gab.model.*",
+  "baseline_scoped": "268 passed (sections 01–04 verifier-report-iter-01)",
+  "report_path": ".grok/org/improve-grok-build-interaction/delegations/verifier-report-section-05.md",
+  "result": {
+    "signal": "VERIFIER_DONE",
+    "tests": 292,
+    "passed": 292,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "pluginVersion": "0.1.30",
+    "command_used": "./gradlew.bat test"
+  }
+}

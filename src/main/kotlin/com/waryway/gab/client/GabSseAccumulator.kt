@@ -5,15 +5,40 @@ import com.waryway.gab.model.Usage
 
 /**
  * Accumulates OpenAI-compatible SSE chat completion chunks into a final result.
+ *
+ * Incomplete tool builders (blank id and/or name at stream end) are excluded from
+ * [GabClient.ChatCompletionResult.toolCalls] and counted in
+ * [GabClient.ChatCompletionResult.incompleteToolCallCount] — never silently discarded
+ * without a signal. Fake tool names are not invented.
+ *
+ * SSE error payloads are recorded on [streamError] so callers can fail the completion
+ * instead of treating an empty stream as success.
  */
 internal class GabSseAccumulator {
     private val content = StringBuilder()
     private val toolCallsByIndex = linkedMapOf<Int, ToolCallBuilder>()
     private var finishReason: String? = null
     private var usage = Usage.ZERO
+    /** Last SSE `error.message` seen; null if no error event was parsed. */
+    private var streamError: String? = null
 
-    fun acceptChunk(json: String) {
-        extractDeltaContent(json)?.let { content.append(it) }
+    /**
+     * Ingest one SSE JSON payload.
+     *
+     * Content is merged via [StreamContentMerger] (snapshot-safe). Returns the
+     * **visible** new fragment for UI streaming (empty/null if nothing new to show).
+     */
+    fun acceptChunk(json: String): String? {
+        var visible: String? = null
+        extractDeltaContent(json)?.let { incoming ->
+            val existing = content.toString()
+            visible = StreamContentMerger.visibleDelta(existing, incoming)
+            val merged = StreamContentMerger.merge(existing, incoming)
+            if (merged != existing) {
+                content.setLength(0)
+                content.append(merged)
+            }
+        }
         extractDeltaToolCalls(json).forEach { (index, id, name, argsFragment) ->
             val builder = toolCallsByIndex.getOrPut(index) { ToolCallBuilder() }
             if (!id.isNullOrBlank()) builder.id = id
@@ -22,17 +47,41 @@ internal class GabSseAccumulator {
         }
         extractFinishReason(json)?.let { finishReason = it }
         extractUsage(json)?.let { usage = it }
+        return visible
     }
 
-    fun toResult(): GabClient.ChatCompletionResult {
+    /** Records a server-reported SSE error message (last write wins). */
+    fun recordStreamError(message: String) {
+        if (message.isNotBlank()) {
+            streamError = message
+        }
+    }
+
+    /**
+     * @param cancelled when true, marks user cancel mid-stream; never invents finishReason="stop".
+     */
+    fun toResult(cancelled: Boolean = false): GabClient.ChatCompletionResult {
+        var incomplete = 0
         val toolCalls = toolCallsByIndex.entries
             .sortedBy { it.key }
-            .mapNotNull { (_, builder) -> builder.toToolCall() }
+            .mapNotNull { (_, builder) ->
+                val toolCall = builder.toToolCall()
+                if (toolCall == null) {
+                    incomplete++
+                    null
+                } else {
+                    toolCall
+                }
+            }
         return GabClient.ChatCompletionResult(
             content = content.toString().ifEmpty { null },
             toolCalls = toolCalls,
+            // null = no non-null string finish_reason observed (distinct from "stop")
             finishReason = finishReason,
-            usage = usage
+            usage = usage,
+            cancelled = cancelled,
+            streamError = streamError,
+            incompleteToolCallCount = incomplete
         )
     }
 
@@ -42,6 +91,7 @@ internal class GabSseAccumulator {
         val arguments: StringBuilder = StringBuilder()
     ) {
         fun toToolCall(): ToolCall? {
+            // Require both id and name — incomplete builders are flagged via incompleteToolCallCount.
             if (id.isBlank() || name.isBlank()) return null
             return ToolCall(id, name, arguments.toString().ifEmpty { "{}" })
         }
@@ -71,11 +121,20 @@ internal class GabSseAccumulator {
             if (!trimmed.startsWith("data:")) return
             val payload = trimmed.removePrefix("data:").trim()
             if (payload.isEmpty() || payload == "[DONE]") return
+            // Prefer recording parseable SSE errors even if later chunk handling fails.
+            val sseError = extractSseError(payload)
+            if (sseError != null) {
+                accumulator.recordStreamError(sseError)
+                onEvent?.invoke(SseEvent.Error(sseError))
+            }
             runCatching {
-                extractSseError(payload)?.let { onEvent?.invoke(SseEvent.Error(it)) }
-                deltaFromChunk(payload)?.let { onEvent?.invoke(SseEvent.Delta(it)) }
+                // Merge first so Delta carries only the new visible fragment
+                // (snapshot chunks would otherwise re-emit the full cumulative text).
+                val visible = accumulator.acceptChunk(payload)
+                if (!visible.isNullOrEmpty()) {
+                    onEvent?.invoke(SseEvent.Delta(visible))
+                }
                 extractFinishReason(payload)?.let { onEvent?.invoke(SseEvent.Finish(it)) }
-                accumulator.acceptChunk(payload)
             }
         }
 
@@ -155,6 +214,10 @@ internal class GabSseAccumulator {
             return ToolCallDelta(index, id, name, args)
         }
 
+        /**
+         * Captures string finish_reason values (`tool_calls`, `stop`, `length`, etc.).
+         * Explicit JSON null / missing does not match — leaves field null (not the string `"null"`).
+         */
         private fun extractFinishReason(json: String): String? =
             Regex(""""finish_reason"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
 

@@ -22,3 +22,5 @@ build/.sandbox/
 *.log
 *.swp
 *~
+# Plugin session / fail packages (local diagnostics)
+.waryway-gab/

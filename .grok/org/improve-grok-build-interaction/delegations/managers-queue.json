@@ -1,0 +1,36 @@
+{
+  "project_slug": "improve-grok-build-interaction",
+  "updated_by": "ceo",
+  "sections": [
+    {
+      "section_id": "section-01-auth-session",
+      "status": "done",
+      "priority": 1,
+      "playbook": "general"
+    },
+    {
+      "section_id": "section-02-chat-stream",
+      "status": "done",
+      "priority": 1,
+      "playbook": "general"
+    },
+    {
+      "section_id": "section-03-agent-api",
+      "status": "done",
+      "priority": 1,
+      "playbook": "general"
+    },
+    {
+      "section_id": "section-04-ux-recovery",
+      "status": "done",
+      "priority": 1,
+      "playbook": "general"
+    },
+    {
+      "section_id": "section-05-regression-ship",
+      "status": "done",
+      "priority": 2,
+      "playbook": "general"
+    }
+  ]
+}

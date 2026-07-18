@@ -1,0 +1,34 @@
+{
+  "project_slug": "grok-support-agent-stability",
+  "updated_by": "ceo",
+  "sections": [
+    {
+      "section_id": "section-02-sse-tool-fidelity",
+      "status": "done",
+      "priority": 1,
+      "playbook": "general",
+      "section_path": ".grok/org/grok-support-agent-stability/sections/section-02-sse-tool-fidelity.md"
+    },
+    {
+      "section_id": "section-03-agent-loop-stability",
+      "status": "done",
+      "priority": 1,
+      "playbook": "general",
+      "section_path": ".grok/org/grok-support-agent-stability/sections/section-03-agent-loop-stability.md"
+    },
+    {
+      "section_id": "section-01-grok-provider",
+      "status": "done",
+      "priority": 2,
+      "playbook": "general",
+      "section_path": ".grok/org/grok-support-agent-stability/sections/section-01-grok-provider.md"
+    },
+    {
+      "section_id": "section-04-regression-tests",
+      "status": "done",
+      "priority": 3,
+      "playbook": "general",
+      "section_path": ".grok/org/grok-support-agent-stability/sections/section-04-regression-tests.md"
+    }
+  ]
+}

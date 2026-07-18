@@ -62,6 +62,27 @@ data class ContextAttachment(
     val displayName: String
 ) {
     enum class Type { FILE, SELECTION, SYMBOL, DIRECTORY_SUMMARY, ERROR }
+
+    /**
+     * Non-blank chip label: prefer [displayName], else basename of [path], else a fixed fallback.
+     * Never returns blank/whitespace-only.
+     */
+    fun chipLabel(): String {
+        displayName.trim().takeIf { it.isNotEmpty() }?.let { return it }
+        val base = path?.trim()?.takeIf { it.isNotEmpty() }?.let { p ->
+            p.substringAfterLast('/').substringAfterLast('\\').ifBlank { p }
+        }
+        return base?.takeIf { it.isNotEmpty() } ?: "(attached file)"
+    }
+
+    /**
+     * Tooltip text: full [path] when set, otherwise non-blank display name / label.
+     */
+    fun chipTooltip(): String {
+        path?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        displayName.trim().takeIf { it.isNotEmpty() }?.let { return it }
+        return chipLabel()
+    }
 }
 
 /** Simple skill definition (used by dropdown + form). */

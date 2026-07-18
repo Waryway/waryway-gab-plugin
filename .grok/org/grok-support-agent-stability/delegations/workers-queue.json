@@ -1,0 +1,19 @@
+{
+  "project_slug": "grok-support-agent-stability",
+  "section_id": null,
+  "iteration": 1,
+  "updated_by": "ceo",
+  "notes": "All iteration-01 orders terminal after worker wave.",
+  "orders": [
+    {"order_id": "wo-01-01", "section_id": "section-01-grok-provider", "iteration": 1, "status": "done", "role": "implementer", "work_order_path": ".grok/org/grok-support-agent-stability/work-orders/wo-01-01.md"},
+    {"order_id": "wo-01-02", "section_id": "section-01-grok-provider", "iteration": 1, "status": "done", "role": "implementer", "work_order_path": ".grok/org/grok-support-agent-stability/work-orders/wo-01-02.md"},
+    {"order_id": "wo-01-03", "section_id": "section-01-grok-provider", "iteration": 1, "status": "done", "role": "implementer", "work_order_path": ".grok/org/grok-support-agent-stability/work-orders/wo-01-03.md"},
+    {"order_id": "wo-s02-01-01", "section_id": "section-02-sse-tool-fidelity", "iteration": 1, "status": "done", "role": "implementer", "work_order_path": ".grok/org/grok-support-agent-stability/work-orders/wo-s02-01-01.md"},
+    {"order_id": "wo-s02-01-02", "section_id": "section-02-sse-tool-fidelity", "iteration": 1, "status": "done", "role": "implementer", "work_order_path": ".grok/org/grok-support-agent-stability/work-orders/wo-s02-01-02.md"},
+    {"order_id": "wo-03-01", "section_id": "section-03-agent-loop-stability", "iteration": 1, "status": "done", "role": "implementer", "work_order_path": ".grok/org/grok-support-agent-stability/work-orders/wo-03-01.md"},
+    {"order_id": "wo-03-02", "section_id": "section-03-agent-loop-stability", "iteration": 1, "status": "done", "role": "tester", "work_order_path": ".grok/org/grok-support-agent-stability/work-orders/wo-03-02.md"},
+    {"order_id": "wo-04-01-01", "section_id": "section-04-regression-tests", "iteration": 1, "status": "done", "role": "tester", "work_order_path": ".grok/org/grok-support-agent-stability/work-orders/wo-04-01-01.md"},
+    {"order_id": "wo-04-01-02", "section_id": "section-04-regression-tests", "iteration": 1, "status": "done", "role": "tester", "work_order_path": ".grok/org/grok-support-agent-stability/work-orders/wo-04-01-02.md"},
+    {"order_id": "wo-04-01-03", "section_id": "section-04-regression-tests", "iteration": 1, "status": "done", "role": "tester", "work_order_path": ".grok/org/grok-support-agent-stability/work-orders/wo-04-01-03.md"}
+  ]
+}

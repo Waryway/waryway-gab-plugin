@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Multi-turn agent loop: send messages + tools, execute tool_calls, continue until done.
+ * Exit policy is centralized in [decideAgentLoop] — never silent empty success.
  */
 class AgentSession(
     private val project: Project,
@@ -60,18 +61,21 @@ class AgentSession(
         var toolCallCount = 0
         var iterations = 0
         var lastContent = ""
+        var ambiguousRetryCount = 0
+        var terminalLogged = false
 
         while (iterations < MAX_ITERATIONS) {
             if (cancelled.get()) {
-                sessionLog?.system("agent cancelled by user")
-                return Result("Stopped by user.", totalUsage, toolCallCount)
+                return cancelledResult(totalUsage, toolCallCount)
             }
 
             iterations++
             val statusLine = if (iterations == 1) "▸ Thinking…" else "▸ Continuing agent loop…"
             sessionLog?.system("iteration $iterations/$MAX_ITERATIONS")
             onStatus(statusLine)
-            if (iterations == 1) onStreamStart()
+            // Reset live stream body every completion (including after tools / retries)
+            // so deltas do not keep growing one bubble across iterations.
+            onStreamStart()
 
             val response = client.chatCompletion(
                 model = model,
@@ -86,50 +90,143 @@ class AgentSession(
             )
             totalUsage = totalUsage.plus(response.usage)
 
-            if (response.toolCalls.isNotEmpty()) {
-                val assistantMsg = ChatMessage(
-                    role = ChatMessage.Role.assistant,
-                    content = response.content.orEmpty(),
-                    toolCalls = response.toolCalls
-                )
-                messages.add(assistantMsg)
+            // Cancel race: AtomicBoolean and/or ChatCompletionResult.cancelled (section-02).
+            // Never treat a cancelled partial stream as clean success.
+            if (cancelled.get() || response.cancelled) {
+                return cancelledResult(totalUsage, toolCallCount)
+            }
 
-                for (toolCall in response.toolCalls) {
-                    if (cancelled.get()) break
+            // SSE streamError on the result (fixtures / non-throwing paths) is a hard failure.
+            val streamErr = response.streamError?.trim().orEmpty()
+            if (streamErr.isNotEmpty()) {
+                lastContent = "Stream error: $streamErr"
+                messages.add(ChatMessage(ChatMessage.Role.assistant, lastContent))
+                sessionLog?.error("agent terminal reason=stream_error: $lastContent")
+                logTerminal("stream_error")
+                terminalLogged = true
+                break
+            }
 
-                    toolCallCount++
-                    val toolLine = "▸ ${toolCall.name}(${summarizeArgs(toolCall.arguments)})"
-                    sessionLog?.tool(toolLine.removePrefix("▸ ").trim())
-                    onStatus(toolLine)
-                    val result = mcpExecutor.execute(toolCall.name, toolCall.arguments)
-                    val resultLine = "  → ${summarizeResult(result)}"
-                    sessionLog?.tool(resultLine.trim())
-                    onStatus(resultLine)
-                    messages.add(
-                        ChatMessage(
-                            role = ChatMessage.Role.tool,
-                            content = result,
-                            toolCallId = toolCall.id
-                        )
-                    )
+            // Incomplete tool builders (excluded from toolCalls) must not look like a clean stop.
+            val finishForDecision =
+                if (response.toolCalls.isEmpty() && response.incompleteToolCallCount > 0) {
+                    val fr = response.finishReason?.trim()?.lowercase().orEmpty()
+                    if (fr == "tool_calls" || fr == "function_call") response.finishReason
+                    else "tool_calls"
+                } else {
+                    response.finishReason
                 }
 
-                if (response.finishReason == "tool_calls" || response.toolCalls.isNotEmpty()) {
+            val decision = decideAgentLoop(
+                cancelled = false,
+                content = response.content,
+                toolCallCount = response.toolCalls.size,
+                finishReason = finishForDecision,
+                iteration = iterations,
+                maxIterations = MAX_ITERATIONS,
+                ambiguousRetryCount = ambiguousRetryCount,
+            )
+
+            when (decision.action) {
+                AgentLoopAction.CONTINUE -> {
+                    val assistantMsg = ChatMessage(
+                        role = ChatMessage.Role.assistant,
+                        content = response.content.orEmpty(),
+                        toolCalls = response.toolCalls
+                    )
+                    messages.add(assistantMsg)
+
+                    for (toolCall in response.toolCalls) {
+                        if (cancelled.get()) {
+                            return cancelledResult(totalUsage, toolCallCount)
+                        }
+
+                        toolCallCount++
+                        val toolLine = "▸ ${toolCall.name}(${summarizeArgs(toolCall.arguments)})"
+                        sessionLog?.tool(toolLine.removePrefix("▸ ").trim())
+                        onStatus(toolLine)
+                        val result = try {
+                            mcpExecutor.execute(toolCall.name, toolCall.arguments)
+                        } catch (e: Exception) {
+                            val err = "Error executing tool ${toolCall.name}: ${e.message ?: e::class.java.simpleName}"
+                            sessionLog?.error(err)
+                            err
+                        }
+                        val resultLine = "  → ${summarizeResult(result)}"
+                        sessionLog?.tool(resultLine.trim())
+                        onStatus(resultLine)
+                        messages.add(
+                            ChatMessage(
+                                role = ChatMessage.Role.tool,
+                                content = result,
+                                toolCallId = toolCall.id
+                            )
+                        )
+                    }
+
+                    if (cancelled.get()) {
+                        return cancelledResult(totalUsage, toolCallCount)
+                    }
+                    // Next completion with tool results in conversation.
                     continue
                 }
-            }
 
-            lastContent = response.content?.trim().orEmpty()
-            if (lastContent.isNotEmpty()) {
-                messages.add(ChatMessage(ChatMessage.Role.assistant, lastContent))
+                AgentLoopAction.RETRY_COMPLETION -> {
+                    ambiguousRetryCount++
+                    sessionLog?.system(
+                        "agent retry reason=${decision.reason} " +
+                            "attempt=$ambiguousRetryCount/$MAX_AMBIGUOUS_RETRIES"
+                    )
+                    continue
+                }
+
+                AgentLoopAction.TERMINAL_SUCCESS -> {
+                    lastContent = decision.userMessage?.trim().orEmpty()
+                        .ifEmpty { response.content?.trim().orEmpty() }
+                    if (lastContent.isNotEmpty()) {
+                        messages.add(ChatMessage(ChatMessage.Role.assistant, lastContent))
+                    }
+                    logTerminal(decision.reason)
+                    terminalLogged = true
+                    break
+                }
+
+                AgentLoopAction.TERMINAL_ERROR -> {
+                    lastContent = decision.userMessage?.trim().orEmpty()
+                        .ifEmpty { "The model returned an empty or incomplete response. Please try again." }
+                    messages.add(ChatMessage(ChatMessage.Role.assistant, lastContent))
+                    sessionLog?.error("agent terminal reason=${decision.reason}: $lastContent")
+                    logTerminal(decision.reason)
+                    terminalLogged = true
+                    break
+                }
+
+                AgentLoopAction.CANCELLED -> {
+                    return cancelledResult(totalUsage, toolCallCount)
+                }
+
+                AgentLoopAction.MAX_ITERATIONS -> {
+                    lastContent = decision.userMessage.orEmpty()
+                    logTerminal("max_iterations")
+                    terminalLogged = true
+                    break
+                }
             }
-            break
         }
 
         if (iterations >= MAX_ITERATIONS) {
             sessionLog?.error("agent stopped after $MAX_ITERATIONS iterations")
+            if (!terminalLogged) {
+                logTerminal("max_iterations")
+                terminalLogged = true
+            }
             lastContent = (lastContent.ifEmpty { "" }) +
                 "\n\n(agent stopped after $MAX_ITERATIONS tool rounds — ask to continue if needed)"
+        }
+
+        if (!terminalLogged) {
+            // Defensive: loop exited without an explicit terminal classification.
+            logTerminal(if (lastContent.isEmpty()) "empty_ambiguous" else "stop")
         }
 
         sessionLog?.system(
@@ -141,6 +238,20 @@ class AgentSession(
             totalUsage = totalUsage,
             toolCallCount = toolCallCount
         )
+    }
+
+    private fun cancelledResult(totalUsage: Usage, toolCallCount: Int): Result {
+        logTerminal("cancel")
+        sessionLog?.system("agent cancelled by user")
+        sessionLog?.system(
+            "agent done: ${"Stopped by user.".length} chars, $toolCallCount tool calls, " +
+                "tokens=${totalUsage.totalTokens}"
+        )
+        return Result("Stopped by user.", totalUsage, toolCallCount)
+    }
+
+    private fun logTerminal(reason: String) {
+        sessionLog?.system("agent terminal reason=$reason")
     }
 
     private fun ensureSystemMessage(messages: MutableList<ChatMessage>, localLlm: Boolean = false) {
@@ -192,5 +303,6 @@ class AgentSession(
 
     companion object {
         const val MAX_ITERATIONS = 20
+        const val MAX_AMBIGUOUS_RETRIES = 2
     }
 }

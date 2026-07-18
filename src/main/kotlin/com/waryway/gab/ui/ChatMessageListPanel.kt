@@ -23,13 +23,21 @@ import javax.swing.SwingUtilities
 
 /**
  * Scrollable message list with role icons — icons are rendered by the plugin, not expected from AI output.
+ *
+ * Streaming path is EDT-throttled: [appendStreamingDelta] updates text often, but full
+ * revalidate/scroll runs at most every [SCROLL_THROTTLE_MS] during an active stream.
+ * Live body is soft-capped at [STREAMING_BODY_SOFT_CAP] with a visible truncation note.
  */
 class ChatMessageListPanel : JBPanel<ChatMessageListPanel>() {
 
     private var activeTurnArea: AutoSizeMessageArea? = null
     private val statusLog = StringBuilder()
+    private var statusLineCount = 0
+    private var statusSoftCapped = false
     private val streamingBody = StringBuilder()
     private var streamingActive = false
+    private var streamingTruncated = false
+    private var lastLayoutScrollMs = 0L
 
     private val messagesPanel = JPanel().apply {
         layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
@@ -55,8 +63,12 @@ class ChatMessageListPanel : JBPanel<ChatMessageListPanel>() {
     fun clear() {
         activeTurnArea = null
         statusLog.clear()
+        statusLineCount = 0
+        statusSoftCapped = false
         streamingBody.clear()
         streamingActive = false
+        streamingTruncated = false
+        lastLayoutScrollMs = 0L
         messagesPanel.removeAll()
         messagesPanel.revalidate()
         messagesPanel.repaint()
@@ -66,24 +78,43 @@ class ChatMessageListPanel : JBPanel<ChatMessageListPanel>() {
     fun beginAgentTurn() {
         activeTurnArea = null
         statusLog.clear()
+        statusLineCount = 0
+        statusSoftCapped = false
         streamingBody.clear()
         streamingActive = false
+        streamingTruncated = false
+        lastLayoutScrollMs = 0L
         addMessage(MessageRole.ASSISTANT, "")
         activeTurnArea = lastMessageArea()
     }
 
-    /** Start live token streaming below any status lines. */
+    /** Start (or reset) live token streaming below any status lines. */
     fun beginStreamingBody() {
         streamingActive = true
         streamingBody.clear()
-        refreshActiveTurnText()
+        streamingTruncated = false
+        lastLayoutScrollMs = 0L
+        refreshActiveTurnText(forceLayout = true)
     }
 
-    /** Append a status line to the active agent turn without creating a new bubble. */
+    /**
+     * Append a status line to the active agent turn without creating a new bubble.
+     * Soft-caps line count so a runaway tool/event loop cannot dump the chat forever.
+     * Full detail stays in the Activity log / fail package.
+     */
     fun appendToAgentTurn(line: String) {
+        if (statusSoftCapped) return
+        if (statusLineCount >= STATUS_LINE_SOFT_CAP) {
+            statusSoftCapped = true
+            if (statusLog.isNotEmpty()) statusLog.append('\n')
+            statusLog.append(STATUS_CAP_NOTE)
+            refreshActiveTurnText(forceLayout = true)
+            return
+        }
+        statusLineCount++
         if (statusLog.isNotEmpty()) statusLog.append('\n')
         statusLog.append(line)
-        refreshActiveTurnText()
+        refreshActiveTurnText(forceLayout = true)
     }
 
     /** Finish the turn with the model's final reply in the same copyable bubble. */
@@ -93,9 +124,10 @@ class ChatMessageListPanel : JBPanel<ChatMessageListPanel>() {
             return
         }
 
+        // Prefer the model’s final content (may be longer than UI soft-capped stream preview).
         val body = when {
-            streamingBody.isNotEmpty() -> streamingBody.toString().trim()
             response.isNotBlank() -> response.trim()
+            streamingBody.isNotEmpty() -> streamingBody.toString().trim()
             else -> "(no response)"
         }
         area.text = buildString {
@@ -110,9 +142,12 @@ class ChatMessageListPanel : JBPanel<ChatMessageListPanel>() {
         }
         activeTurnArea = null
         statusLog.clear()
+        statusLineCount = 0
+        statusSoftCapped = false
         streamingBody.clear()
         streamingActive = false
-        refreshAfterTextChange(area)
+        streamingTruncated = false
+        refreshAfterTextChange(area, forceLayout = true)
     }
 
     fun addMessage(role: MessageRole, text: String) {
@@ -124,13 +159,31 @@ class ChatMessageListPanel : JBPanel<ChatMessageListPanel>() {
 
     /** Append streaming text to the last assistant message instead of fragmenting into many bubbles. */
     fun appendStreamingDelta(delta: String) {
+        if (delta.isEmpty()) return
         if (activeTurnArea == null) beginAgentTurn()
         if (!streamingActive) beginStreamingBody()
-        streamingBody.append(delta)
-        refreshActiveTurnText()
+        appendToStreamingBody(delta)
+        refreshActiveTurnText(forceLayout = false)
     }
 
-    private fun refreshActiveTurnText() {
+    private fun appendToStreamingBody(delta: String) {
+        if (streamingTruncated) return
+        val room = STREAMING_BODY_SOFT_CAP - streamingBody.length
+        if (room <= 0) {
+            streamingTruncated = true
+            streamingBody.append(TRUNCATION_NOTE)
+            return
+        }
+        if (delta.length <= room) {
+            streamingBody.append(delta)
+            return
+        }
+        streamingBody.append(delta, 0, room)
+        streamingTruncated = true
+        streamingBody.append(TRUNCATION_NOTE)
+    }
+
+    private fun refreshActiveTurnText(forceLayout: Boolean) {
         val area = activeTurnArea ?: return
         area.text = buildString {
             if (statusLog.isNotEmpty()) {
@@ -139,7 +192,7 @@ class ChatMessageListPanel : JBPanel<ChatMessageListPanel>() {
             }
             append(streamingBody)
         }
-        refreshAfterTextChange(area)
+        refreshAfterTextChange(area, forceLayout = forceLayout)
     }
 
     fun loadMessages(entries: List<Pair<MessageRole, String>>) {
@@ -172,9 +225,23 @@ class ChatMessageListPanel : JBPanel<ChatMessageListPanel>() {
         return null
     }
 
-    private fun refreshAfterTextChange(area: AutoSizeMessageArea) {
-        area.revalidate()
+    /**
+     * @param forceLayout always revalidate + scroll (status lines, complete, stream start).
+     *        When false during streaming, layout/scroll is throttled to [SCROLL_THROTTLE_MS].
+     */
+    private fun refreshAfterTextChange(area: AutoSizeMessageArea, forceLayout: Boolean) {
+        // Cheap paint of the text area itself so tokens still appear.
         area.repaint()
+        if (!forceLayout && streamingActive) {
+            val now = System.currentTimeMillis()
+            if (now - lastLayoutScrollMs < SCROLL_THROTTLE_MS) {
+                return
+            }
+            lastLayoutScrollMs = now
+        } else {
+            lastLayoutScrollMs = System.currentTimeMillis()
+        }
+        area.revalidate()
         messagesPanel.revalidate()
         messagesPanel.repaint()
         SwingUtilities.invokeLater { scrollToBottom() }
@@ -273,5 +340,17 @@ class ChatMessageListPanel : JBPanel<ChatMessageListPanel>() {
         ASSISTANT("Agent", AllIcons.Toolwindows.ToolWindowMessages, GabTheme.assistantMessageBg, GabTheme.assistantMessageFg, GabTheme.assistantMessageBorder),
         TOOL("Agent", AllIcons.Actions.Execute, GabTheme.systemMessageBg, GabTheme.systemMessageFg, GabTheme.systemMessageBorder),
         SYSTEM("System", AllIcons.General.Information, GabTheme.systemMessageBg, GabTheme.systemMessageFg, GabTheme.systemMessageBorder)
+    }
+
+    companion object {
+        /** Soft cap on live streaming body to bound RAM / layout cost. */
+        const val STREAMING_BODY_SOFT_CAP: Int = 200_000
+        /** Soft cap on status / tool lines in the agent bubble (full log is elsewhere). */
+        const val STATUS_LINE_SOFT_CAP: Int = 80
+        /** Min interval between full revalidate + scroll during streaming. */
+        const val SCROLL_THROTTLE_MS: Long = 80L
+        const val TRUNCATION_NOTE: String = "\n\n… (stream truncated for UI)"
+        const val STATUS_CAP_NOTE: String =
+            "… (status lines capped for UI — see Activity log or Export fail package)"
     }
 }
