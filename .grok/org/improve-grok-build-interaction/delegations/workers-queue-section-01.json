@@ -1,0 +1,22 @@
+{
+  "project_slug": "improve-grok-build-interaction",
+  "section_id": "section-01-auth-session",
+  "iteration": 1,
+  "updated_by": "manager-section-01-auth-session",
+  "orders": [
+    {
+      "order_id": "wo-s01-01",
+      "status": "pending",
+      "role": "implementer",
+      "section_id": "section-01-auth-session",
+      "work_order_path": ".grok/org/improve-grok-build-interaction/work-orders/wo-s01-01.md"
+    },
+    {
+      "order_id": "wo-s01-02",
+      "status": "pending",
+      "role": "implementer",
+      "section_id": "section-01-auth-session",
+      "work_order_path": ".grok/org/improve-grok-build-interaction/work-orders/wo-s01-02.md"
+    }
+  ]
+}

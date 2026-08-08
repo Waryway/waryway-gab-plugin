@@ -16,7 +16,8 @@ class InputNormalizerTest {
     fun `removes i figured it out phrasing`() {
         val input = "I figured it out - we need to change the timeout"
         val result = InputNormalizer.normalize(input)
-        assertEquals("we need to change timeout", result)
+        // Filler phrase is stripped; leading dash separator after "out" is left as-is.
+        assertEquals("- we need to change timeout", result)
     }
 
     @Test

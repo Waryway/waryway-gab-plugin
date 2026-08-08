@@ -38,6 +38,7 @@ class AttachmentChipPanel(
     }
 
     private fun buildChip(attachment: ContextAttachment): JPanel {
+        val label = attachment.chipLabel()
         val chip = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
             isOpaque = true
             background = GabTheme.chipBackground
@@ -45,7 +46,7 @@ class AttachmentChipPanel(
                 BorderFactory.createLineBorder(GabTheme.chipBorder, 1, true),
                 JBUI.Borders.empty(2, 6)
             )
-            toolTipText = attachment.path ?: attachment.displayName
+            toolTipText = attachment.chipTooltip()
         }
 
         val icon = when (attachment.type) {
@@ -57,7 +58,7 @@ class AttachmentChipPanel(
         }
 
         chip.add(JBLabel(icon))
-        chip.add(JBLabel(attachment.displayName).apply {
+        chip.add(JBLabel(label).apply {
             font = font.deriveFont(Font.PLAIN, 11f)
             foreground = GabTheme.textForeground
         })

@@ -1,0 +1,39 @@
+{
+  "project_slug": "improve-grok-build-interaction",
+  "section_id": "section-05-regression-ship",
+  "iteration": 1,
+  "updated_by": "manager-section-05-regression-ship",
+  "notes": "Checkpoint: both implementers WORK_DONE; verifier full suite 292/292; section AC met → SECTION_DONE. No further worker wave.",
+  "prior_wave_done": [
+    "wo-s01-01",
+    "wo-s01-02",
+    "wo-02-01",
+    "wo-02-02",
+    "wo-03-01",
+    "wo-03-02",
+    "wo-04-01",
+    "wo-04-02",
+    "wo-05-01",
+    "wo-05-02"
+  ],
+  "orders": [
+    {
+      "order_id": "wo-05-01",
+      "status": "WORK_DONE",
+      "role": "implementer",
+      "section_id": "section-05-regression-ship",
+      "iteration": 1,
+      "work_order_path": ".grok/org/improve-grok-build-interaction/work-orders/wo-05-01.md",
+      "summary": "Audit + 3 pure GrokBuildAuth.requestHeaders cases; 271 scoped green"
+    },
+    {
+      "order_id": "wo-05-02",
+      "status": "WORK_DONE",
+      "role": "implementer",
+      "section_id": "section-05-regression-ship",
+      "iteration": 1,
+      "work_order_path": ".grok/org/improve-grok-build-interaction/work-orders/wo-05-02.md",
+      "summary": "pluginVersion 0.1.30 + CHANGELOG + README/HOW_TO_LOAD stamps"
+    }
+  ]
+}

@@ -34,6 +34,12 @@ class ConversationTabBar(
     private var conversations: List<Conversation> = emptyList()
     private var activeId: String? = null
     private val tabButtons = mutableListOf<JToggleButton>()
+    /**
+     * While true, history combo selection changes are programmatic (title refresh after send)
+     * and must not call [onSwitchConversation] — that reloads the message list and can
+     * duplicate user bubbles / wipe the live agent turn.
+     */
+    private var suppressHistorySwitch = false
 
     init {
         border = JBUI.Borders.emptyBottom(4)
@@ -45,9 +51,14 @@ class ConversationTabBar(
             add(JBLabel(AllIcons.Actions.ShowAsTree).apply { toolTipText = "Conversation history" })
             historyCombo.preferredSize = java.awt.Dimension(140, 24)
             historyCombo.addActionListener {
+                if (suppressHistorySwitch) return@addActionListener
                 val idx = historyCombo.selectedIndex
                 if (idx >= 0 && idx < conversations.size) {
-                    onSwitchConversation(conversations[idx].id)
+                    val id = conversations[idx].id
+                    // Ignore no-op reselection of the already-active chat.
+                    if (id != activeId) {
+                        onSwitchConversation(id)
+                    }
                 }
             }
             add(historyCombo)
@@ -80,18 +91,25 @@ class ConversationTabBar(
                 background = if (isActive) GabTheme.activeTabBackground else GabTheme.panelBackground
                 toolTipText = conv.title
                 addActionListener {
-                    if (isSelected) onSwitchConversation(conv.id)
+                    if (isSelected && conv.id != activeId) {
+                        onSwitchConversation(conv.id)
+                    }
                 }
             }
             tabButtons.add(btn)
             tabPanel.add(btn)
         }
 
-        historyCombo.removeAllItems()
-        conversations.forEach { historyCombo.addItem(truncate(it.title, 28)) }
-        val activeIndex = conversations.indexOfFirst { it.id == activeId }
-        if (activeIndex >= 0) {
-            historyCombo.selectedIndex = activeIndex
+        suppressHistorySwitch = true
+        try {
+            historyCombo.removeAllItems()
+            conversations.forEach { historyCombo.addItem(truncate(it.title, 28)) }
+            val activeIndex = conversations.indexOfFirst { it.id == activeId }
+            if (activeIndex >= 0) {
+                historyCombo.selectedIndex = activeIndex
+            }
+        } finally {
+            suppressHistorySwitch = false
         }
 
         revalidate()

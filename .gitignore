@@ -1,8 +1,12 @@
 # Gradle
 .gradle/
+.gradle-*/
 .intellijPlatform/
 terminals/
 agent-tools/
+
+# Accidental compile output at repo root
+/com/
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
@@ -22,3 +26,8 @@ build/.sandbox/
 *.log
 *.swp
 *~
+# Plugin session / fail packages (local diagnostics)
+.waryway-gab/
+
+# Local PR draft helpers
+.pr-create.json

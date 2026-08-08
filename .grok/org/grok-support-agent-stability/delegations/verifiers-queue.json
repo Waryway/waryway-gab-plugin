@@ -1,0 +1,43 @@
+{
+  "project_slug": "grok-support-agent-stability",
+  "updated_by": "manager-section-02-sse-tool-fidelity",
+  "notes": "Multi-section-aware verifiers list. Merge by section_id; do not wipe other sections.",
+  "verifiers": [
+    {
+      "section_id": "section-01-grok-provider",
+      "iteration": 1,
+      "status": "pending",
+      "type": "build-test",
+      "command": "./gradlew.bat test --tests \"com.waryway.gab.model.ModelCatalogTest\" --tests \"com.waryway.gab.client.GabClientJsonTest\"",
+      "updated_by": "manager-section-01-grok-provider",
+      "notes": "From section-01 iteration-01; full ./gradlew.bat test if time."
+    },
+    {
+      "section_id": "section-02-sse-tool-fidelity",
+      "iteration": 1,
+      "status": "passed",
+      "type": "build-test",
+      "command": "./gradlew.bat test --tests com.waryway.gab.client.GabSseAccumulatorTest --tests com.waryway.gab.client.GabClientJsonTest",
+      "updated_by": "manager-section-02-sse-tool-fidelity",
+      "notes": "Checkpoint manager-run: BUILD SUCCESSFUL. CEO: client package green; full suite 2 unrelated fails. SECTION_DONE."
+    },
+    {
+      "section_id": "section-03-agent-loop-stability",
+      "iteration": 1,
+      "status": "pending",
+      "type": "build-test",
+      "command": "./gradlew.bat test --tests \"com.waryway.gab.chat.AgentLoopDecision*\"",
+      "updated_by": "manager-section-03-agent-loop-stability",
+      "notes": "Then full ./gradlew.bat test if scoped pass."
+    },
+    {
+      "section_id": "section-04-regression-tests",
+      "iteration": 1,
+      "status": "pending",
+      "type": "build-test",
+      "command": "./gradlew test",
+      "updated_by": "manager-section-04-regression-tests",
+      "notes": "Full suite green on Windows after workers wo-04-01-01..03. Soft-coord with section-02 SSE tests and section-03 decision helper tests."
+    }
+  ]
+}

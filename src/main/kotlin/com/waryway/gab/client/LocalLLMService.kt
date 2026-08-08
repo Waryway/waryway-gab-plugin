@@ -29,13 +29,11 @@ class LocalLLMService(
     )
 
     private val rootUrl: String
-        get() = settings.localLlmBaseUrl
-            .removeSuffix("/v1")
-            .removeSuffix("/")
-            .ifBlank { "http://127.0.0.1:7400" }
+        get() = AgentClient.normalizeLocalRootUrl(settings.localLlmBaseUrl)
 
     private val client = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(8))
+        // Short connect so offline LocalLLM never stalls workbench / tool-window open.
+        .connectTimeout(Duration.ofSeconds(2))
         .build()
 
     fun fetchStatus(): Status {
@@ -102,13 +100,18 @@ class LocalLLMService(
             .header("Accept", "application/json")
             .apply { authHeader()?.let { header("Authorization", it) } }
             .GET()
-            .timeout(Duration.ofSeconds(15))
+            .timeout(Duration.ofSeconds(5))
             .build()
-        val resp = client.send(req, HttpResponse.BodyHandlers.ofString())
+        val resp = try {
+            client.send(req, HttpResponse.BodyHandlers.ofString())
+        } catch (e: Exception) {
+            val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+            throw LocalLLMException("GET $url failed: $detail")
+        }
         if (resp.statusCode() !in 200..299) {
             val snippet = resp.body().take(300)
             log(LogLevel.ERROR, "GET $url → HTTP ${resp.statusCode()}: $snippet")
-            throw LocalLLMException("HTTP ${resp.statusCode()}: ${snippet.take(200)}")
+            throw LocalLLMException(formatHttpError(resp.statusCode(), snippet))
         }
         return resp.body()
     }
@@ -133,9 +136,26 @@ class LocalLLMService(
         return resp.body()
     }
 
+    /**
+     * Bearer for OpenAI-compatible routes that require a key when
+     * `data/localllm/config.json` sets `openai.apiKey` (default localllm-local).
+     * Uses [WarywayGabSettings.getApiKey] which falls back to localllm-local when blank.
+     * Returns null only if somehow still blank (should not happen for Local LLM defaults).
+     */
     private fun authHeader(): String? {
         val key = settings.getApiKey(com.waryway.gab.model.ModelProvider.LOCAL_LLM)?.trim()
         return if (key.isNullOrBlank()) null else "Bearer $key"
+    }
+
+    /** Clear 401/auth text for status/models helpers (not empty silence). */
+    internal fun formatHttpError(status: Int, bodySnippet: String): String {
+        val snippet = bodySnippet.trim().replace('\n', ' ')
+        if (status == 401 || GabClient.isInvalidApiKeyBody(snippet)) {
+            val serverMsg = GabClient.extractOpenAiErrorMessage(snippet) ?: "invalid or missing API key"
+            return "HTTP 401: $serverMsg — set Local LLM API key to match config openai.apiKey " +
+                "(default localllm-local)"
+        }
+        return "HTTP $status: ${snippet.take(200)}"
     }
 
     private fun parsePresets(body: String): List<Preset> {

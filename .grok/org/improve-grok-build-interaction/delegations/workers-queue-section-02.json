@@ -1,0 +1,27 @@
+{
+  "project_slug": "improve-grok-build-interaction",
+  "section_id": "section-02-chat-stream",
+  "iteration": 1,
+  "updated_by": "manager-section-02-chat-stream",
+  "checkpoint": "SECTION_DONE",
+  "orders": [
+    {
+      "order_id": "wo-02-01",
+      "section_id": "section-02-chat-stream",
+      "iteration": 1,
+      "status": "done",
+      "role": "implementer",
+      "work_order_path": ".grok/org/improve-grok-build-interaction/work-orders/wo-02-01.md",
+      "summary": "Stream contract lock: merger/SSE/abort/GROK_BUILD headers + tests"
+    },
+    {
+      "order_id": "wo-02-02",
+      "section_id": "section-02-chat-stream",
+      "iteration": 1,
+      "status": "done",
+      "role": "implementer",
+      "work_order_path": ".grok/org/improve-grok-build-interaction/work-orders/wo-02-02.md",
+      "summary": "Actionable GROK_BUILD chat failure UX helper + chat-path wire"
+    }
+  ]
+}

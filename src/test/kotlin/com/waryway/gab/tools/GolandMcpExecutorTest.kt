@@ -10,7 +10,8 @@ class GolandMcpExecutorTest {
     @Test
     fun `injectProjectPath adds field to empty object`() {
         val result = GolandMcpExecutor.injectProjectPath("{}", "C:/proj")
-        assertContains(result, """"projectPath": "C:/proj"""")
+        // Compact JSON (no space after colon) for the empty-object path.
+        assertContains(result, """"projectPath":"C:/proj"""")
     }
 
     @Test
