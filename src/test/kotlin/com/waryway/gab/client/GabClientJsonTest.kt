@@ -76,6 +76,100 @@ class GabClientJsonTest {
     }
 
     @Test
+    fun `stream timeout defaults are generous and provider aware`() {
+        assertEquals(
+            GabClient.DEFAULT_CLOUD_STREAM_TIMEOUT_SECONDS,
+            GabClient("k", ModelProvider.GROK_BUILD).streamTimeoutSeconds
+        )
+        assertEquals(
+            GabClient.DEFAULT_LOCAL_STREAM_TIMEOUT_SECONDS,
+            GabClient("k", ModelProvider.LOCAL_LLM).streamTimeoutSeconds
+        )
+        assertEquals(
+            600L,
+            GabClient("k", ModelProvider.GAB_AI, streamTimeoutSeconds = 600L).streamTimeoutSeconds
+        )
+        // Explicit 0 falls back to provider default.
+        assertEquals(
+            GabClient.DEFAULT_CLOUD_STREAM_TIMEOUT_SECONDS,
+            GabClient.resolveStreamTimeoutSeconds(0L, ModelProvider.GROK)
+        )
+        assertTrue(GabClient.DEFAULT_CLOUD_STREAM_TIMEOUT_SECONDS > 210L)
+        assertTrue(GabClient.DEFAULT_LOCAL_STREAM_TIMEOUT_SECONDS >= GabClient.DEFAULT_CLOUD_STREAM_TIMEOUT_SECONDS)
+    }
+
+    @Test
+    fun `shouldRetryTimeout only when partial is empty or tiny`() {
+        assertTrue(GabClient.shouldRetryTimeout(null))
+        assertTrue(GabClient.shouldRetryTimeout(""))
+        assertTrue(GabClient.shouldRetryTimeout("short"))
+        assertFalse(
+            GabClient.shouldRetryTimeout(
+                "x".repeat(GabClient.USEFUL_PARTIAL_MIN_CHARS)
+            )
+        )
+        assertFalse(
+            GabClient.shouldRetryTimeout(
+                "This is a useful partial reply that already streamed many tokens."
+            )
+        )
+    }
+
+    @Test
+    fun `classifyTransportKind connect class is TRANSPORT not TIMEOUT`() {
+        assertEquals(
+            GabClient.GabApiException.Kind.TRANSPORT,
+            GabClient.classifyTransportKind("ConnectException", "Connection refused")
+        )
+        assertEquals(
+            GabClient.GabApiException.Kind.TRANSPORT,
+            GabClient.classifyTransportKind(
+                "HttpConnectTimeoutException",
+                "HTTP connect timed out"
+            )
+        )
+        assertEquals(
+            GabClient.GabApiException.Kind.TRANSPORT,
+            GabClient.classifyTransportKind(null, "connect timed out")
+        )
+        assertTrue(GabClient.isConnectClassTransport("ConnectException", "Connection refused"))
+    }
+
+    @Test
+    fun `classifyTransportKind stream budget is TIMEOUT`() {
+        assertEquals(
+            GabClient.GabApiException.Kind.TIMEOUT,
+            GabClient.classifyTransportKind("HttpTimeoutException", "request timed out")
+        )
+        assertEquals(
+            GabClient.GabApiException.Kind.TIMEOUT,
+            GabClient.classifyTransportKind(null, "Read timed out")
+        )
+        assertFalse(GabClient.isConnectClassTransport(null, "Read timed out"))
+    }
+
+    @Test
+    fun `resolveSessionTimeoutMs scales with stream budget`() {
+        val session = GabClient.resolveSessionTimeoutMs(15L * 60L)
+        assertTrue(session >= 30L * 60L * 1000L, "session=$session")
+        assertTrue(session <= 4L * 60L * 60L * 1000L, "session=$session")
+        // 15m stream → 60m session (4×)
+        assertEquals(60L * 60L * 1000L, GabClient.resolveSessionTimeoutMs(15L * 60L))
+    }
+
+    @Test
+    fun `GabApiException withPartialContent preserves kind`() {
+        val ex = GabClient.GabApiException(
+            "Chat timed out after 900s",
+            kind = GabClient.GabApiException.Kind.TIMEOUT
+        )
+        val with = ex.withPartialContent("hello partial")
+        assertEquals(GabClient.GabApiException.Kind.TIMEOUT, with.kind)
+        assertEquals("hello partial", with.partialContent)
+        assertEquals(ex.message, with.message)
+    }
+
+    @Test
     fun `grok request is OpenAI-compatible with tools and stream`() {
         val body = grok.buildJsonChatRequest(
             model = "grok-4",
@@ -207,6 +301,25 @@ class GabClientJsonTest {
         val e = GabClient.GabApiException("Chat failed: HTTP 401", """{"error":{"message":"unauthorized"}}""")
         assertEquals("Chat failed: HTTP 401", e.message)
         assertEquals("""{"error":{"message":"unauthorized"}}""", e.body)
+    }
+
+    @Test
+    fun `isInvalidApiKeyBody and extractOpenAiErrorMessage parse server 401`() {
+        val body = """{"error":{"message":"invalid API key","type":"invalid_api_key"}}"""
+        assertTrue(GabClient.isInvalidApiKeyBody(body))
+        assertEquals("invalid API key", GabClient.extractOpenAiErrorMessage(body))
+        assertFalse(GabClient.isInvalidApiKeyBody("""{"error":{"message":"rate limit","type":"rate_limit"}}"""))
+    }
+
+    @Test
+    fun `AUTH kind is distinct and not confused with TIMEOUT`() {
+        val auth = GabClient.GabApiException(
+            "Chat failed: HTTP 401 — invalid API key",
+            body = """{"error":{"type":"invalid_api_key","message":"invalid API key"}}""",
+            kind = GabClient.GabApiException.Kind.AUTH
+        )
+        assertEquals(GabClient.GabApiException.Kind.AUTH, auth.kind)
+        assertTrue(GabClient.isInvalidApiKeyBody(auth.body))
     }
 
     @Test

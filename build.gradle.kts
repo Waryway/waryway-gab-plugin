@@ -76,6 +76,19 @@ tasks {
     buildSearchableOptions {
         enabled = false
     }
+
+    /**
+     * `runIde` starts GoLand via JavaExec + sandbox classpath (plugin loaded from
+     * `build/.../sandbox`), not `bin\goland.bat` / `bin\goland64.exe`.
+     *
+     * Without this flag, recent IDEs show:
+     *   "IDE seems to be launched with a script launcher … switch to … goland64.exe"
+     * That tip is for normal desktop shortcuts — not applicable to Gradle plugin sandbox runs.
+     * IntelliJ Platform Gradle Plugin sets this too; we set it explicitly so it always sticks.
+     */
+    runIde {
+        systemProperty("ide.native.launcher", "false")
+    }
 }
 
 kotlin {

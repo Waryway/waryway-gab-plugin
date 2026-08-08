@@ -11,6 +11,7 @@ import com.waryway.gab.client.GrokBuildAuth
 import com.waryway.gab.client.GrokBuildAuthRecovery
 import com.waryway.gab.model.ModelCatalog
 import com.waryway.gab.model.ModelProvider
+import com.waryway.gab.ui.LocalLlmSendUx
 import java.awt.Desktop
 import java.net.URI
 import javax.swing.SwingConstants
@@ -167,7 +168,7 @@ class WarywayGabConfigurable : BoundConfigurable("Waryway Agent") {
                 row {
                     comment("OpenAI-compatible endpoint from apps/localllm (default http://127.0.0.1:7400/v1). Run scripts\\localllm-run.bat first.")
                 }
-                row("API Key (optional):") {
+                row("API Key:") {
                     localLlmApiKeyField = passwordField()
                         .columns(40)
                         .bindText(
@@ -176,7 +177,11 @@ class WarywayGabConfigurable : BoundConfigurable("Waryway Agent") {
                         )
                 }
                 row {
-                    comment("Default: localllm-local — must match data/localllm/config.json openai.apiKey if set.")
+                    comment(
+                        "Default: localllm-local — must match data/localllm/config.json openai.apiKey when set. " +
+                            "Wrong/empty key → HTTP 401 (visible error), not a blank chat reply. " +
+                            "Only optional if server openai.apiKey is empty (open mode)."
+                    )
                 }
                 row("Default Local Model:") {
                     localLlmDefaultModelField = textField()
@@ -246,6 +251,20 @@ class WarywayGabConfigurable : BoundConfigurable("Waryway Agent") {
                             { settings.localLlmAgentMaxSteps = it }
                         )
                 }
+                row("Agent poll timeout (minutes):") {
+                    intTextField(IntRange(5, 120))
+                        .bindIntText(
+                            { settings.localLlmAgentTimeoutMinutes },
+                            { settings.localLlmAgentTimeoutMinutes = it }
+                        )
+                }
+                row {
+                    comment(
+                        "How long GoLand waits for /api/agent runs (default 30). " +
+                            "Pure-Go go-cpu planning can take several minutes; raise for slow CPUs. " +
+                            "Polls are quiet (no per-GET spam) and back off while stuck."
+                    )
+                }
             }
 
             separator()
@@ -260,19 +279,24 @@ class WarywayGabConfigurable : BoundConfigurable("Waryway Agent") {
                 }
                 row {
                     comment(
-                        "Enable Settings → Tools → MCP Server in GoLand. Port auto-scans 63342–63352 " +
-                            "(or IDE_PORT env). Agent tools call the built-in MCP HTTP API."
+                        "Optional: Enable Settings → Tools → MCP Server for the full IDE toolset. " +
+                            "If MCP HTTP is off (common: /api/about works, list_tools 404), the plugin " +
+                            "uses in-process native tools (read/search/edit/run). Port auto-scans " +
+                            "63342–63352 (or IDE_PORT). Pin the port here once known."
                     )
                 }
                 row {
-                    checkBox("Enable MCP tools for Local LLM")
+                    checkBox("Enable IDE tools for Local LLM")
                         .bindSelected(
                             { settings.localLlmUseMcpTools },
                             { settings.localLlmUseMcpTools = it }
                         )
                 }
                 row {
-                    comment("Off by default — small local models often mishandle tool_calls.")
+                    comment(
+                        "Off by default — small local models often mishandle tool_calls. " +
+                            "When on, uses MCP if reachable else native tools."
+                    )
                 }
             }
 
@@ -298,6 +322,21 @@ class WarywayGabConfigurable : BoundConfigurable("Waryway Agent") {
                         { settings.thinkingLevel },
                         { settings.thinkingLevel = it ?: "auto" }
                     )
+            }
+
+            row("Chat stream timeout (minutes, 0 = auto):") {
+                intTextField(IntRange(0, 120))
+                    .bindIntText(
+                        { settings.chatStreamTimeoutMinutes },
+                        { settings.chatStreamTimeoutMinutes = it }
+                    )
+            }
+            row {
+                comment(
+                    "SSE budget for Gab / Grok / Grok Build / Local chat (not Local agent poll). " +
+                        "0 = auto (cloud 15 min, local chat 30 min). Was 3.5 min hard-coded and " +
+                        "timed out long reasoning. Transient timeouts are retried automatically."
+                )
             }
 
             row {
@@ -370,7 +409,8 @@ class WarywayGabConfigurable : BoundConfigurable("Waryway Agent") {
             return
         }
         try {
-            if (provider != ModelProvider.LOCAL_LLM && provider != ModelProvider.GROK_BUILD && key.isNotBlank()) {
+            if (provider != ModelProvider.GROK_BUILD && key.isNotBlank()) {
+                // Include Local LLM so the field value under test is what we send (401 if wrong).
                 settings.setApiKey(key, provider)
             }
             val client = settings.createClient(provider)
@@ -387,13 +427,18 @@ class WarywayGabConfigurable : BoundConfigurable("Waryway Agent") {
                 "${provider.displayName} connection"
             )
         } catch (e: Exception) {
-            val message = if (provider == ModelProvider.GROK_BUILD) {
-                refreshGrokBuildSessionLabel()
-                val body = (e as? GabClient.GabApiException)?.body
-                GrokBuildAuthRecovery.formatAuthFailure(message = e.message, body = body)
-                    ?: "${provider.displayName} connection failed: ${e.message}"
-            } else {
-                "${provider.displayName} connection failed: ${e.message}"
+            val message = when (provider) {
+                ModelProvider.GROK_BUILD -> {
+                    refreshGrokBuildSessionLabel()
+                    val body = (e as? GabClient.GabApiException)?.body
+                    GrokBuildAuthRecovery.formatAuthFailure(message = e.message, body = body)
+                        ?: "${provider.displayName} connection failed: ${e.message}"
+                }
+                ModelProvider.LOCAL_LLM ->
+                    LocalLlmSendUx.formatAuthFailure(e, agentMode = false)
+                        ?: LocalLlmSendUx.formatFailure(e, agentMode = false, rootUrl = settings.localLlmBaseUrl)
+                else ->
+                    "${provider.displayName} connection failed: ${e.message}"
             }
             com.intellij.openapi.ui.Messages.showErrorDialog(
                 message,

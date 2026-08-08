@@ -98,7 +98,7 @@ class LocalLlmSendUxTest {
     fun `isUnreachableError ignores agent poll timeout`() {
         assertFalse(
             LocalLlmSendUx.isUnreachableError(
-                "Agent run timed out after 480s (id=abc-123)"
+                "Agent run timed out after 1800s (id=abc-123)"
             )
         )
     }
@@ -124,6 +124,118 @@ class LocalLlmSendUxTest {
             agentMode = false
         )
         assertEquals("Error: HTTP 500: boom", msg)
+    }
+
+    @Test
+    fun `formatFailure HTTP 401 surfaces auth not blank silence`() {
+        val err = com.waryway.gab.client.GabClient.GabApiException(
+            message = "Chat failed: HTTP 401 — invalid API key",
+            body = """{"error":{"message":"invalid API key","type":"invalid_api_key"}}""",
+            kind = com.waryway.gab.client.GabClient.GabApiException.Kind.AUTH
+        )
+        val msg = LocalLlmSendUx.formatFailure(err, agentMode = false)
+        assertTrue(msg.contains("401"), msg)
+        assertTrue(msg.contains("auth") || msg.contains("API key"), msg)
+        assertTrue(msg.contains(LocalLlmSendUx.DEFAULT_API_KEY), msg)
+        assertFalse(msg.startsWith("Error: Chat failed"), msg)
+    }
+
+    @Test
+    fun `formatAuthFailure null when not auth`() {
+        assertEquals(null, LocalLlmSendUx.formatAuthFailure(RuntimeException("HTTP 500: boom")))
+        assertFalse(LocalLlmSendUx.isAuthError(RuntimeException("Connection refused")))
+    }
+
+    @Test
+    fun `isAuthError matches invalid_api_key body`() {
+        val err = com.waryway.gab.client.GabClient.GabApiException(
+            "Chat failed: HTTP 401",
+            """{"error":{"message":"invalid API key","type":"invalid_api_key"}}"""
+        )
+        assertTrue(LocalLlmSendUx.isAuthError(err))
+        val formatted = LocalLlmSendUx.formatAuthFailure(err, agentMode = false)
+        assertTrue(formatted != null && formatted.contains("invalid API key"), formatted ?: "null")
+    }
+
+    @Test
+    fun `formatFailure agent timeout is recovery oriented not bare Error`() {
+        val err = RuntimeException(
+            "Agent run timed out after 1800s (id=abc, state=planning, step=0/30)"
+        )
+        val msg = LocalLlmSendUx.formatFailure(err, agentMode = true)
+        assertTrue(msg.contains("timed out"), msg)
+        assertTrue(
+            msg.contains("Agent poll") || msg.contains("poll timeout") || msg.contains("Chat"),
+            msg
+        )
+        assertFalse(msg.startsWith("Error: Agent run timed out"), msg)
+        assertFalse(msg.contains("unreachable"), msg)
+    }
+
+    @Test
+    fun `formatFailure chat stream timeout mentions stream budget`() {
+        val err = RuntimeException("Chat timed out after 900s (provider=Local LLM).")
+        val msg = LocalLlmSendUx.formatFailure(err, agentMode = false)
+        assertTrue(msg.contains("timed out"), msg)
+        assertTrue(msg.contains("stream") || msg.contains("Chat stream") || msg.contains("generation"), msg)
+        assertFalse(msg.contains("unreachable"), msg)
+    }
+
+    @Test
+    fun `formatFailure timeout with partialContent keeps streamed text`() {
+        val err = com.waryway.gab.client.GabClient.GabApiException(
+            message = "Chat timed out after 900s (provider=Local LLM).",
+            kind = com.waryway.gab.client.GabClient.GabApiException.Kind.TIMEOUT,
+            partialContent = "I was halfway through explaining the fix"
+        )
+        val msg = LocalLlmSendUx.formatFailure(err, agentMode = false)
+        assertTrue(msg.contains("I was halfway through explaining the fix"), msg)
+        assertTrue(msg.contains("partial reply kept"), msg.lowercase())
+        assertTrue(msg.contains("timed out"), msg)
+        assertTrue(
+            msg.contains("continue", ignoreCase = true) || msg.contains("retry", ignoreCase = true),
+            msg
+        )
+    }
+
+    @Test
+    fun `formatFailure auth is never labeled as timeout`() {
+        val err = com.waryway.gab.client.GabClient.GabApiException(
+            message = "Chat failed: HTTP 401 — invalid API key",
+            body = """{"error":{"message":"invalid API key","type":"invalid_api_key"}}""",
+            kind = com.waryway.gab.client.GabClient.GabApiException.Kind.AUTH
+        )
+        val msg = LocalLlmSendUx.formatFailure(err, agentMode = false)
+        assertTrue(msg.contains("401") || msg.contains("auth"), msg.lowercase())
+        assertFalse(msg.contains("stream budget"), msg.lowercase())
+        assertFalse(msg.contains("partial reply kept"), msg.lowercase())
+        assertFalse(AgentTimeoutUx.isTimeoutError(err))
+    }
+
+    @Test
+    fun `formatFailure connect transport is unreachable not stream timeout`() {
+        val err = com.waryway.gab.client.GabClient.GabApiException(
+            message = "Chat transport failed: Connection refused",
+            body = "Connection refused",
+            kind = com.waryway.gab.client.GabClient.GabApiException.Kind.TRANSPORT
+        )
+        val msg = LocalLlmSendUx.formatFailure(err, agentMode = false)
+        assertTrue(msg.contains("unreachable"), msg)
+        assertFalse(msg.contains("stream budget"), msg.lowercase())
+        assertFalse(msg.contains("Chat stream timeout"), msg)
+    }
+
+    @Test
+    fun `stillGeneratingStatus mentions go-cpu and elapsed`() {
+        val msg = LocalLlmSendUx.stillGeneratingStatus(
+            elapsedSeconds = 90,
+            streamBudgetSeconds = 1800
+        )
+        assertTrue(msg.contains("Still generating"), msg)
+        assertTrue(msg.contains("90s") || msg.contains("1m 30s"), msg)
+        assertTrue(msg.contains("go-cpu") || msg.contains("90s+"), msg)
+        assertTrue(msg.contains("30m") || msg.contains("1800"), msg)
+        assertEquals(30_000L, LocalLlmSendUx.STILL_GENERATING_INTERVAL_MS)
     }
 
     @Test

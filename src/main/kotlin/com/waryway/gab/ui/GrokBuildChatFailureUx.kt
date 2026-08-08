@@ -36,23 +36,50 @@ object GrokBuildChatFailureUx {
             LocalLlmSendUx.formatFailure(error, agentMode = false, rootUrl = rootUrl)
         ModelProvider.GROK_BUILD ->
             GrokBuildSendUx.formatFailure(error = error, proxyRoot = proxyRoot)
-        else -> formatGenericCloudFailure(error)
+        else -> formatGenericCloudFailure(error, provider)
     }
 
     /**
      * Generic non-Local, non–Grok-Build cloud chat failure (Gab AI / Grok API).
-     * Keeps `Error:` prefix; includes short body when [GabClient.GabApiException] carries one.
+     * Timeout → [AgentTimeoutUx]; else `Error:` with optional body snippet.
      */
-    fun formatGenericCloudFailure(error: Throwable?): String {
+    fun formatGenericCloudFailure(
+        error: Throwable?,
+        provider: ModelProvider = ModelProvider.GAB_AI
+    ): String {
         val msg = error?.message?.trim().orEmpty()
         val cls = error?.javaClass?.simpleName.orEmpty()
+        val combined = listOf(cls, msg).filter { it.isNotBlank() }.joinToString(" ")
+        val apiEx = error as? GabClient.GabApiException
+        if (AgentTimeoutUx.isTimeoutError(error) || AgentTimeoutUx.isTimeoutMessage(msg) ||
+            AgentTimeoutUx.isTimeoutMessage(combined) ||
+            apiEx?.kind == GabClient.GabApiException.Kind.TIMEOUT
+        ) {
+            val cloud = when (provider) {
+                ModelProvider.GROK -> ModelProvider.GROK
+                else -> ModelProvider.GAB_AI
+            }
+            return AgentTimeoutUx.formatTimeoutFailureWithPartial(
+                provider = cloud,
+                timeoutSeconds = AgentTimeoutUx.extractTimeoutSeconds(msg),
+                detail = msg.takeIf { it.isNotBlank() && it.length <= 120 },
+                partialContent = apiEx?.partialContent
+            )
+        }
         val base = msg.ifBlank { cls.ifBlank { "unknown failure" } }
-        val body = (error as? GabClient.GabApiException)?.body
+        val body = apiEx?.body
         val snippet = GrokBuildSendUx.shortBodyDetail(body)
-        return if (snippet != null && !base.contains(snippet)) {
+        val errorLine = if (snippet != null && !base.contains(snippet)) {
             "Error: $base ($snippet)"
         } else {
             "Error: $base"
+        }
+        val partial = apiEx?.partialContent?.trim().orEmpty()
+        return if (partial.isNotEmpty()) {
+            AgentTimeoutUx.mergePartialWithTimeout(partial, errorLine)
+                .replace("— Timed out (partial reply kept) —", "— Interrupted (partial reply kept) —")
+        } else {
+            errorLine
         }
     }
 }

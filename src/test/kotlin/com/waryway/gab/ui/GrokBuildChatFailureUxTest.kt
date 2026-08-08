@@ -75,6 +75,44 @@ class GrokBuildChatFailureUxTest {
     }
 
     @Test
+    fun `GROK_BUILD timeout maps to recovery not bare Error`() {
+        val err = GabClient.GabApiException(
+            "Chat timed out after 900s (provider=Grok Build).",
+            kind = GabClient.GabApiException.Kind.TIMEOUT
+        )
+        val msg = GrokBuildChatFailureUx.formatChatFailure(err, ModelProvider.GROK_BUILD)
+        assertTrue(msg.contains("timed out"), msg)
+        assertTrue(msg.contains("Grok Build"), msg)
+        assertTrue(msg.contains("Retry") || msg.contains("retry") || msg.contains("stream"), msg)
+        assertFalse(msg.startsWith("Error: Chat timed out"), msg)
+        assertFalse(msg.contains("LocalLLM"), msg)
+    }
+
+    @Test
+    fun `GROK_BUILD timeout with partial keeps streamed reply`() {
+        val err = GabClient.GabApiException(
+            "Chat timed out after 900s (provider=Grok Build).",
+            kind = GabClient.GabApiException.Kind.TIMEOUT,
+            partialContent = "Here is the beginning of the answer"
+        )
+        val msg = GrokBuildChatFailureUx.formatChatFailure(err, ModelProvider.GROK_BUILD)
+        assertTrue(msg.contains("Here is the beginning of the answer"), msg)
+        assertTrue(msg.contains("partial reply kept"), msg.lowercase())
+    }
+
+    @Test
+    fun `Gab AI timeout maps via generic cloud formatter`() {
+        val err = GabClient.GabApiException(
+            "Chat timed out after 900s",
+            kind = GabClient.GabApiException.Kind.TIMEOUT
+        )
+        val msg = GrokBuildChatFailureUx.formatChatFailure(err, ModelProvider.GAB_AI)
+        assertTrue(msg.contains("timed out"), msg)
+        assertTrue(msg.contains("Gab AI") || msg.contains("stream"), msg)
+        assertFalse(msg.contains("cli-chat-proxy"), msg)
+    }
+
+    @Test
     fun `null error yields non-empty fallback`() {
         val msg = GrokBuildChatFailureUx.formatChatFailure(null, ModelProvider.GROK_BUILD)
         assertTrue(msg.isNotBlank(), msg)

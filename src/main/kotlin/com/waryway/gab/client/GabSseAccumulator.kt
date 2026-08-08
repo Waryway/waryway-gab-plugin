@@ -57,6 +57,9 @@ internal class GabSseAccumulator {
         }
     }
 
+    /** Current merged assistant text (may be partial mid-stream). Blank → null. */
+    fun peekContent(): String? = content.toString().ifBlank { null }
+
     /**
      * @param cancelled when true, marks user cancel mid-stream; never invents finishReason="stop".
      */

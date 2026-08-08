@@ -126,12 +126,32 @@ object GrokBuildSendUx {
             return networkMessage(detail = detail, proxyRoot = proxyRoot)
         }
 
+        val apiEx = error as? GabClient.GabApiException
+        if (AgentTimeoutUx.isTimeoutError(error) || AgentTimeoutUx.isTimeoutMessage(msg) ||
+            AgentTimeoutUx.isTimeoutMessage(combined) ||
+            apiEx?.kind == GabClient.GabApiException.Kind.TIMEOUT
+        ) {
+            return AgentTimeoutUx.formatTimeoutFailureWithPartial(
+                provider = com.waryway.gab.model.ModelProvider.GROK_BUILD,
+                timeoutSeconds = AgentTimeoutUx.extractTimeoutSeconds(msg),
+                detail = msg.takeIf { it.isNotBlank() && it.length <= 120 },
+                partialContent = apiEx?.partialContent
+            )
+        }
+
         val base = msg.ifBlank { cls.ifBlank { "unknown failure" } }
         val snippet = shortBodyDetail(apiBody)
-        return if (snippet != null && !base.contains(snippet)) {
+        val errorLine = if (snippet != null && !base.contains(snippet)) {
             "Error: $base ($snippet)"
         } else {
             "Error: $base"
+        }
+        val partial = apiEx?.partialContent?.trim().orEmpty()
+        return if (partial.isNotEmpty()) {
+            AgentTimeoutUx.mergePartialWithTimeout(partial, errorLine)
+                .replace("— Timed out (partial reply kept) —", "— Interrupted (partial reply kept) —")
+        } else {
+            errorLine
         }
     }
 

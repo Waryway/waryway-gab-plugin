@@ -17,6 +17,34 @@ class AgentClientTest {
 
     private val client = AgentClient(rootUrlOverride = "http://127.0.0.1:7400")
 
+    // ── Root URL normalization (Local LLM agent/health) ────────────────────
+
+    @Test
+    fun `normalizeLocalRootUrl strips trailing slash then v1`() {
+        assertEquals(
+            "http://127.0.0.1:7400",
+            AgentClient.normalizeLocalRootUrl("http://127.0.0.1:7400/v1/")
+        )
+        assertEquals(
+            "http://127.0.0.1:7400",
+            AgentClient.normalizeLocalRootUrl("http://127.0.0.1:7400/v1")
+        )
+        assertEquals(
+            "http://127.0.0.1:7400",
+            AgentClient.normalizeLocalRootUrl("http://127.0.0.1:7400/")
+        )
+        assertEquals(
+            "http://127.0.0.1:7400",
+            AgentClient.normalizeLocalRootUrl("  ")
+        )
+    }
+
+    @Test
+    fun `rootUrlOverride with trailing v1 slash strips correctly`() {
+        val c = AgentClient(rootUrlOverride = "http://127.0.0.1:7400/v1/")
+        assertEquals("http://127.0.0.1:7400", c.rootUrl)
+    }
+
     // ── Start body serialization ───────────────────────────────────────────
 
     @Test
@@ -190,9 +218,31 @@ class AgentClientTest {
         assertNull(run.plan)
         assertNull(run.finalAnswer)
         assertNull(run.error)
+        assertNull(run.message)
         assertTrue(run.events.isEmpty())
         assertTrue(run.dryRun)
         assertEquals("C:\\repo", run.repoRoot)
+    }
+
+    @Test
+    fun `parseRun maps optional server message progress field`() {
+        val body = """
+            {
+              "id":"run-msg",
+              "goal":"g",
+              "state":"planning",
+              "dryRun":false,
+              "step":0,
+              "maxSteps":30,
+              "repoRoot":"/r",
+              "message":"generating plan (go-cpu)…",
+              "events":[]
+            }
+        """.trimIndent()
+        val run = client.parseRun(body)
+        assertEquals("generating plan (go-cpu)…", run.message)
+        assertEquals("planning", run.state)
+        assertFalse(run.dryRun)
     }
 
     @Test

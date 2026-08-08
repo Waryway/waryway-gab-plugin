@@ -32,12 +32,9 @@ class AgentClient(
     private fun settingsOrDefault(): WarywayGabSettings =
         settings ?: WarywayGabSettings.getInstance()
 
-    /** Base URL without trailing /v1, same as [LocalLLMService]. */
+    /** Base URL without trailing /v1, same rule as [LocalLlmSendUx.normalizeRootUrl]. */
     val rootUrl: String
-        get() = (rootUrlOverride ?: settingsOrDefault().localLlmBaseUrl)
-            .removeSuffix("/v1")
-            .removeSuffix("/")
-            .ifBlank { "http://127.0.0.1:7400" }
+        get() = normalizeLocalRootUrl(rootUrlOverride ?: settingsOrDefault().localLlmBaseUrl)
 
     private val client = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(8))
@@ -91,6 +88,8 @@ class AgentClient(
         val step: Int = 0,
         val maxSteps: Int = 0,
         val dryRun: Boolean = true,
+        /** Server progress line (planning / tool name / heuristic fallback). */
+        val message: String? = null,
         val createdAt: String? = null,
         val updatedAt: String? = null,
         val finalAnswer: String? = null,
@@ -134,14 +133,26 @@ class AgentClient(
         return run
     }
 
-    /** GET /api/agent/runs/{id} — poll run snapshot. */
-    fun getRun(id: String): AgentRun {
+    /**
+     * GET /api/agent/runs/{id} — poll run snapshot.
+     *
+     * [quiet] skips per-poll HTTP/SYS log lines. Poll loops should pass quiet=true and
+     * log only on state/step/message changes — pure-Go local LLM planning can take minutes
+     * and otherwise floods the activity log with identical `state=planning step=0/N` lines.
+     */
+    fun getRun(id: String, quiet: Boolean = false): AgentRun {
         require(id.isNotBlank()) { "run id must not be blank" }
         val url = "$rootUrl/api/agent/runs/${id.trim()}"
-        log(LogLevel.HTTP, "GET $url")
+        if (!quiet) log(LogLevel.HTTP, "GET $url")
         val body = get(url)
         val run = parseRun(body)
-        log(LogLevel.SYSTEM, "agent get: id=${run.id} state=${run.state} step=${run.step}/${run.maxSteps}")
+        if (!quiet) {
+            log(
+                LogLevel.SYSTEM,
+                "agent get: id=${run.id} state=${run.state} step=${run.step}/${run.maxSteps}" +
+                    run.message?.takeIf { it.isNotBlank() }?.let { " msg=$it" }.orEmpty()
+            )
+        }
         return run
     }
 
@@ -270,6 +281,7 @@ class AgentClient(
             step = intField(body, "step") ?: 0,
             maxSteps = intField(body, "maxSteps") ?: 0,
             dryRun = boolField(body, "dryRun") ?: true,
+            message = stringField(body, "message"),
             createdAt = stringField(body, "createdAt"),
             updatedAt = stringField(body, "updatedAt"),
             finalAnswer = stringField(body, "finalAnswer"),
@@ -589,5 +601,21 @@ class AgentClient(
 
     companion object {
         val TERMINAL_STATES: Set<String> = setOf("done", "failed", "cancelled")
+
+        /**
+         * Strip trailing slashes and a final `/v1` segment so
+         * `http://host:7400/v1/` → `http://host:7400` (not left as `…/v1`).
+         * Shared with [LocalLLMService] — keep in sync with [com.waryway.gab.ui.LocalLlmSendUx.normalizeRootUrl].
+         */
+        fun normalizeLocalRootUrl(
+            baseUrl: String,
+            fallback: String = "http://127.0.0.1:7400"
+        ): String {
+            var u = baseUrl.trim().trimEnd('/')
+            if (u.length >= 3 && u.endsWith("/v1", ignoreCase = true)) {
+                u = u.dropLast(3).trimEnd('/')
+            }
+            return u.ifBlank { fallback }
+        }
     }
 }

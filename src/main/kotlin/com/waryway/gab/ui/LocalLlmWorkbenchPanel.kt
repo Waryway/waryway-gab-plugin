@@ -10,6 +10,7 @@ import com.waryway.gab.client.LocalLLMService
 import com.waryway.gab.diagnostics.SessionLog
 import com.waryway.gab.settings.WarywayGabSettings
 import java.awt.BorderLayout
+import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
 import javax.swing.JButton
@@ -17,8 +18,8 @@ import javax.swing.JComboBox
 import javax.swing.JPanel
 
 /**
- * Local LLM workflow strip: status, presets, corpus collect, rebuild,
- * plus agent-mode / dry-run controls for /api/agent.
+ * Local LLM workflow strip: one-line status + agent/apply badges by default;
+ * presets, collect, rebuild, and secondary controls behind a collapsible Advanced row.
  */
 class LocalLlmWorkbenchPanel(
     private val settings: WarywayGabSettings,
@@ -29,7 +30,7 @@ class LocalLlmWorkbenchPanel(
     private val lastExchange: () -> Pair<String, String>?,
     /** Fired when agent mode or dry-run/apply changes so parent can refresh Send badge. */
     private val onModeChanged: () -> Unit = {}
-) : JPanel(BorderLayout(4, 4)) {
+) : JPanel(BorderLayout(4, 2)) {
 
     var contextSize: Int = settings.localLlmContextTokens
         private set
@@ -87,74 +88,90 @@ class LocalLlmWorkbenchPanel(
     private val presetCombo = JComboBox(arrayOf("gab-chat", "concise", "goland", "stack", "corpus", "code-edit"))
     private var corpusCount = 0
 
+    /** Advanced row (presets / collect / rebuild / path detail) — collapsed by default. */
+    private var advancedExpanded = ChromeLayoutDefaults.WORKBENCH_ADVANCED_DEFAULT_EXPANDED
+    private var advancedRow: JPanel = JPanel()
+    private val advancedToggle = JButton("▸ Advanced").apply {
+        isBorderPainted = false
+        isContentAreaFilled = false
+        isFocusPainted = false
+        font = font.deriveFont(Font.PLAIN, 11f)
+        toolTipText = "Show presets, collect, rebuild, and path detail"
+        addActionListener { setAdvancedExpanded(!advancedExpanded) }
+    }
+
     init {
         border = JBUI.Borders.compound(
             JBUI.Borders.customLine(JBColor.border(), 1, 0, 0, 0),
-            JBUI.Borders.empty(6, 4)
+            JBUI.Borders.empty(4, 4)
         )
         isOpaque = true
         background = GabTheme.panelBackground
 
-        val row1 = JPanel(FlowLayout(FlowLayout.LEFT, 6, 2)).apply {
+        // Always-visible primary strip. Wrap-aware preferred height (FlowLayout undercounts
+        // multi-row wrap) with a hard cap so the strip cannot bury the SOUTH composer.
+        val primaryRow = wrapAwarePrimaryRow().apply {
             isOpaque = false
             add(JBLabel(AllIcons.Nodes.Plugin).apply { toolTipText = "Offline LLM workbench" })
             add(statusLabel)
             add(pathBadge)
             add(dryRunBadge)
-            add(repoRootLabel)
+            add(agentModeCheck)
+            add(applyChangesCheck)
             add(JButton(AllIcons.Actions.Refresh).apply {
                 toolTipText = "Refresh LocalLLM status"
                 isBorderPainted = false
                 addActionListener { refreshStatus() }
             })
+            add(advancedToggle)
         }
 
-        val row2 = JPanel(FlowLayout(FlowLayout.LEFT, 6, 2)).apply {
-            isOpaque = false
-            add(agentModeCheck)
-            add(applyChangesCheck)
-            add(sendPathStatus)
-            agentModeCheck.addActionListener {
-                settings.localLlmAgentMode = agentModeCheck.isSelected
-                applyChangesCheck.isEnabled = agentModeCheck.isSelected
-                refreshModeBadges()
-                sessionLog?.system(
-                    if (agentModeCheck.isSelected) {
-                        "local agent mode ON → /api/agent (${LocalLlmSendUx.sendPathLabel(true, isDryRun())})"
-                    } else {
-                        "local agent mode OFF → /v1/chat/completions (Chat)"
-                    }
-                )
-                onModeChanged()
-            }
-            applyChangesCheck.addActionListener {
-                // Invert: checkbox = apply → settings dryRun is opposite
-                val apply = applyChangesCheck.isSelected
-                if (apply) {
-                    val confirm = javax.swing.JOptionPane.showConfirmDialog(
-                        this@LocalLlmWorkbenchPanel,
-                        "Apply mode allows the LocalLLM agent to write files under its repo root.\n" +
-                            "Continue with dryRun=false for agent runs?",
-                        "Enable apply changes",
-                        javax.swing.JOptionPane.YES_NO_OPTION,
-                        javax.swing.JOptionPane.WARNING_MESSAGE
-                    )
-                    if (confirm != javax.swing.JOptionPane.YES_OPTION) {
-                        applyChangesCheck.isSelected = false
-                        settings.localLlmAgentDryRun = true
-                        refreshModeBadges()
-                        onModeChanged()
-                        return@addActionListener
-                    }
+        agentModeCheck.addActionListener {
+            settings.localLlmAgentMode = agentModeCheck.isSelected
+            applyChangesCheck.isEnabled = agentModeCheck.isSelected
+            refreshModeBadges()
+            sessionLog?.system(
+                if (agentModeCheck.isSelected) {
+                    "local agent mode ON → /api/agent (${LocalLlmSendUx.sendPathLabel(true, isDryRun())})"
+                } else {
+                    "local agent mode OFF → /v1/chat/completions (Chat)"
                 }
-                settings.localLlmAgentDryRun = !apply
-                refreshModeBadges()
-                sessionLog?.system(
-                    if (settings.localLlmAgentDryRun) "agent dry-run ON (safe) → Next Send: Agent · dry-run"
-                    else "agent APPLY enabled (dryRun=false) → Next Send: Agent · APPLY"
+            )
+            onModeChanged()
+        }
+        applyChangesCheck.addActionListener {
+            // Invert: checkbox = apply → settings dryRun is opposite
+            val apply = applyChangesCheck.isSelected
+            if (apply) {
+                val confirm = javax.swing.JOptionPane.showConfirmDialog(
+                    this@LocalLlmWorkbenchPanel,
+                    "Apply mode allows the LocalLLM agent to write files under its repo root.\n" +
+                        "Continue with dryRun=false for agent runs?",
+                    "Enable apply changes",
+                    javax.swing.JOptionPane.YES_NO_OPTION,
+                    javax.swing.JOptionPane.WARNING_MESSAGE
                 )
-                onModeChanged()
+                if (confirm != javax.swing.JOptionPane.YES_OPTION) {
+                    applyChangesCheck.isSelected = false
+                    settings.localLlmAgentDryRun = true
+                    refreshModeBadges()
+                    onModeChanged()
+                    return@addActionListener
+                }
             }
+            settings.localLlmAgentDryRun = !apply
+            refreshModeBadges()
+            sessionLog?.system(
+                if (settings.localLlmAgentDryRun) "agent dry-run ON (safe) → Next Send: Agent · dry-run"
+                else "agent APPLY enabled (dryRun=false) → Next Send: Agent · APPLY"
+            )
+            onModeChanged()
+        }
+
+        val advancedRow = JPanel(FlowLayout(FlowLayout.LEFT, 6, 2)).apply {
+            isOpaque = false
+            add(sendPathStatus)
+            add(repoRootLabel)
             add(JBLabel("Preset:"))
             add(presetCombo)
             presetCombo.selectedItem = settings.localLlmPreset
@@ -180,12 +197,98 @@ class LocalLlmWorkbenchPanel(
                 addActionListener { BrowserUtil.browse(serviceRoot()) }
             })
         }
+        this.advancedRow = advancedRow
 
-        add(row1, BorderLayout.NORTH)
-        add(row2, BorderLayout.CENTER)
+        add(primaryRow, BorderLayout.NORTH)
+        add(advancedRow, BorderLayout.CENTER)
+        setAdvancedExpanded(ChromeLayoutDefaults.WORKBENCH_ADVANCED_DEFAULT_EXPANDED)
         refreshModeBadges()
         refreshStatus()
     }
+
+    fun isAdvancedExpanded(): Boolean = advancedExpanded
+
+    fun setAdvancedExpanded(value: Boolean) {
+        advancedExpanded = value
+        advancedRow.isVisible = value
+        advancedToggle.text = if (value) "▾ Advanced" else "▸ Advanced"
+        advancedToggle.toolTipText =
+            if (value) "Hide presets, collect, rebuild, and path detail"
+            else "Show presets, collect, rebuild, and path detail"
+        // Collapsed advanced: keep panel max height cheap (primary strip only, wrap-capped).
+        // Expanded: allow advanced row preferred height through.
+        maximumSize = if (value) {
+            Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
+        } else {
+            val insets = insets
+            val maxH = ChromeLayoutDefaults.WORKBENCH_PRIMARY_MAX_PREFERRED_HEIGHT_PX +
+                insets.top + insets.bottom + 4
+            Dimension(Int.MAX_VALUE, maxH)
+        }
+        revalidate()
+        repaint()
+    }
+
+    /**
+     * FlowLayout primary strip with wrap-aware preferred height, capped at
+     * [ChromeLayoutDefaults.WORKBENCH_PRIMARY_MAX_WRAP_ROWS] so narrow widths
+     * allocate correct multi-row space without dominating the fold.
+     */
+    private fun wrapAwarePrimaryRow(): JPanel =
+        object : JPanel(FlowLayout(FlowLayout.LEFT, 6, 2)) {
+            override fun getPreferredSize(): Dimension {
+                val insets = insets
+                val maxInner = (parent?.width?.takeIf { it > 0 }
+                    ?: width.takeIf { it > 0 }
+                    ?: Int.MAX_VALUE)
+                    .let { it - insets.left - insets.right }
+                    .coerceAtLeast(1)
+                val hgap = 6
+                val vgap = 2
+                var rowW = 0
+                var rowH = 0
+                var totalH = 0
+                var completedRows = 0
+                var maxRowW = 0
+                for (i in 0 until componentCount) {
+                    val c = getComponent(i)
+                    if (!c.isVisible) continue
+                    val d = c.preferredSize
+                    val next = if (rowW == 0) d.width else rowW + hgap + d.width
+                    if (rowW > 0 && next > maxInner) {
+                        totalH += rowH + if (completedRows > 0) vgap else 0
+                        maxRowW = maxOf(maxRowW, rowW)
+                        completedRows++
+                        rowW = d.width
+                        rowH = d.height
+                    } else {
+                        rowW = next
+                        rowH = maxOf(rowH, d.height)
+                    }
+                }
+                if (rowH > 0) {
+                    totalH += rowH + if (completedRows > 0) vgap else 0
+                    maxRowW = maxOf(maxRowW, rowW)
+                    completedRows++
+                }
+                if (totalH <= 0) {
+                    totalH = ChromeLayoutDefaults.WORKBENCH_PRIMARY_ROW_TAX_PX
+                }
+                val maxRows = ChromeLayoutDefaults.WORKBENCH_PRIMARY_MAX_WRAP_ROWS
+                if (completedRows > maxRows && rowH > 0) {
+                    // Cap: first [maxRows] of measured average row height.
+                    val avgRow = (totalH - (completedRows - 1) * vgap) / completedRows
+                    totalH = avgRow * maxRows + vgap * (maxRows - 1)
+                }
+                val cap = ChromeLayoutDefaults.WORKBENCH_PRIMARY_MAX_PREFERRED_HEIGHT_PX
+                val prefW = maxRowW + insets.left + insets.right
+                val prefH = (totalH + insets.top + insets.bottom).coerceAtMost(cap)
+                return Dimension(prefW.coerceAtLeast(1), prefH.coerceAtLeast(ChromeLayoutDefaults.WORKBENCH_PRIMARY_ROW_TAX_PX))
+            }
+
+            override fun getMinimumSize(): Dimension =
+                Dimension(0, ChromeLayoutDefaults.WORKBENCH_PRIMARY_ROW_TAX_PX)
+        }
 
     /** Whether Send should use `/api/agent` for Local LLM. */
     fun isAgentMode(): Boolean = agentModeCheck.isSelected
@@ -194,7 +297,7 @@ class LocalLlmWorkbenchPanel(
     fun isDryRun(): Boolean = !applyChangesCheck.isSelected || !agentModeCheck.isSelected
 
     fun serviceRoot(): String =
-        settings.localLlmBaseUrl.removeSuffix("/v1").removeSuffix("/")
+        com.waryway.gab.client.AgentClient.normalizeLocalRootUrl(settings.localLlmBaseUrl)
             .ifBlank { "http://127.0.0.1:7400" }
 
     /** Update dry-run / apply badge and optional repoRoot from a run snapshot. */
@@ -272,10 +375,13 @@ class LocalLlmWorkbenchPanel(
                     }
                 }
             } catch (e: Exception) {
-                sessionLog?.error("status refresh failed: ${e.message}")
+                val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                sessionLog?.error("status refresh failed: $detail")
                 javax.swing.SwingUtilities.invokeLater {
-                    statusLabel.text = "Offline — run scripts\\localllm-run.bat"
+                    // Offline is a normal state — keep the workbench visible; do not blank the tool window.
+                    statusLabel.text = "Offline — start LocalLLM (scripts\\localllm-run.bat)"
                     statusLabel.foreground = JBColor.RED
+                    statusLabel.toolTipText = "Could not reach ${serviceRoot()}: $detail"
                 }
             }
         }.start()

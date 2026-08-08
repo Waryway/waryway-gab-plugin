@@ -56,6 +56,17 @@ class WarywayGabSettings : PersistentStateComponent<WarywayGabSettings.State> {
         /** Max plan/execute steps for agent runs; 0 = server default. */
         var localLlmAgentMaxSteps: Int = 30,
         /**
+         * Client-side agent poll timeout in minutes (GoLand waits this long for /api/agent).
+         * Default 30 — pure-Go go-cpu can exceed the old 8-minute cap during planning.
+         */
+        var localLlmAgentTimeoutMinutes: Int = 30,
+        /**
+         * Full SSE chat stream budget (minutes) for Gab / Grok / Grok Build / Local chat.
+         * 0 = provider default (cloud 15m, local chat 30m). Was hard-coded 210s and caused
+         * premature timeouts on long reasoning and slow local generation.
+         */
+        var chatStreamTimeoutMinutes: Int = 0,
+        /**
          * When true and provider is LOCAL_LLM, Send uses AgentClient (/api/agent)
          * instead of AgentSession chat completions.
          */
@@ -144,6 +155,38 @@ class WarywayGabSettings : PersistentStateComponent<WarywayGabSettings.State> {
     var localLlmAgentMaxSteps: Int
         get() = myState.localLlmAgentMaxSteps.coerceIn(0, 200)
         set(value) { myState.localLlmAgentMaxSteps = value.coerceIn(0, 200) }
+
+    /** Client poll timeout for Local LLM agent runs (minutes). */
+    var localLlmAgentTimeoutMinutes: Int
+        get() = myState.localLlmAgentTimeoutMinutes.coerceIn(5, 120)
+        set(value) { myState.localLlmAgentTimeoutMinutes = value.coerceIn(5, 120) }
+
+    /**
+     * Chat SSE stream budget in minutes. 0 = use [GabClient] provider defaults
+     * (cloud 15, local 30). Explicit 3–120 overrides for all chat providers.
+     */
+    var chatStreamTimeoutMinutes: Int
+        get() {
+            val v = myState.chatStreamTimeoutMinutes
+            if (v <= 0) return 0
+            return v.coerceIn(3, 120)
+        }
+        set(value) {
+            myState.chatStreamTimeoutMinutes = when {
+                value <= 0 -> 0
+                else -> value.coerceIn(3, 120)
+            }
+        }
+
+    /**
+     * Stream timeout in seconds for [createClient], applying provider defaults when
+     * [chatStreamTimeoutMinutes] is 0.
+     */
+    fun chatStreamTimeoutSeconds(provider: ModelProvider = activeProvider): Long {
+        val minutes = chatStreamTimeoutMinutes
+        if (minutes > 0) return minutes.toLong() * 60L
+        return GabClient.resolveStreamTimeoutSeconds(0L, provider)
+    }
 
     /** LOCAL_LLM only: true → /api/agent; false → chat completions (AgentSession). */
     var localLlmAgentMode: Boolean
@@ -302,7 +345,8 @@ class WarywayGabSettings : PersistentStateComponent<WarywayGabSettings.State> {
             provider = provider,
             baseUrlOverride = baseUrl,
             localLlmPreset = if (provider == ModelProvider.LOCAL_LLM) localLlmPreset else null,
-            sessionLog = sessionLog
+            sessionLog = sessionLog,
+            streamTimeoutSeconds = chatStreamTimeoutSeconds(provider)
         )
     }
 

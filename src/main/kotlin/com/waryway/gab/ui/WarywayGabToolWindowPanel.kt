@@ -33,18 +33,23 @@ import com.waryway.gab.model.CreditsInfo
 import com.waryway.gab.model.ModelCatalog
 import com.waryway.gab.model.ModelProvider
 import com.waryway.gab.settings.WarywayGabSettings
-import com.waryway.gab.skills.InputNormalizer
+import com.waryway.gab.skills.SkillCatalog
+import com.waryway.gab.skills.SkillRef
 import com.waryway.gab.skills.SkillRegistry
+import com.waryway.gab.skills.SkillSendInjection
 import kotlinx.coroutines.runBlocking
 import java.awt.*
 import java.awt.datatransfer.StringSelection
 import java.awt.event.InputEvent
+import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.*
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 import javax.swing.text.DefaultEditorKit
 import com.intellij.openapi.ide.CopyPasteManager
 
@@ -64,12 +69,17 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
         ModelCatalog.fallbackModelIds(ModelProvider.LOCAL_LLM).toTypedArray()
     )
     private val thinkingCombo = JComboBox(arrayOf("auto", "none", "standard", "deep"))
-    private val skillCombo = JComboBox(SkillRegistry.all.map { it.name }.toTypedArray())
+    /** Secondary skill chrome; model filled from [skillCatalog] (discovery), not hard-coded only. */
+    private val skillCombo = JComboBox<String>()
     private val skillHintLabel = JBLabel().apply {
         font = font.deriveFont(java.awt.Font.ITALIC, 11f)
         foreground = JBColor.GRAY
         border = JBUI.Borders.emptyLeft(4)
     }
+    /** Discovered skills (bundled + user + project). Refreshed when the tool window builds / picker opens. */
+    private var skillCatalog: List<SkillRef> = emptyList()
+    private lateinit var skillPicker: ComposerSkillPicker
+    private var skillPickerWired = false
     private val stopButton = JButton("Stop", AllIcons.Actions.Suspend).apply {
         isEnabled = false
         toolTipText = "Stop the current agent / stream (also aborts blocked SSE reads)"
@@ -105,14 +115,35 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
     private lateinit var conversationTabBar: ConversationTabBar
     private lateinit var attachmentChipPanel: AttachmentChipPanel
 
-    private val inputArea = JBTextArea(3, 40).apply {
+    /**
+     * Compact grow-on-demand composer: min 1 row, grows to [ComposerLayoutMetrics.MAX_VISIBLE_ROWS], then scrolls.
+     * §02 may attach additional [DocumentListener]s for slash skill UX — do not replace this document.
+     */
+    private val inputArea = JBTextArea(ComposerLayoutMetrics.MIN_VISIBLE_ROWS, ComposerLayoutMetrics.DEFAULT_COLUMNS).apply {
         lineWrap = true
         wrapStyleWord = true
         border = BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(JBColor.border()),
             JBUI.Borders.empty(4)
         )
-        toolTipText = "Enter to send · Shift+Enter or Ctrl+Enter for new line · Drop files to attach"
+        toolTipText = "Enter to send · Shift+Enter or Ctrl+Enter for new line · Drop files to attach · / for skills"
+    }
+    private lateinit var inputScroll: JBScrollPane
+    /** Ensures grow-on-demand [DocumentListener] is attached once across [rebuildUI] cycles. */
+    private var composerGrowWired = false
+    /** Header/stop/send/combo listeners attached once (fields outlive [rebuildUI]). */
+    private var mainChromeListenersWired = false
+    /**
+     * When true, combo action listeners ignore programmatic selection changes.
+     * Prevents nested [rebuildUI] mid-[createMainChatPanel] (orphans inputScroll / composer).
+     */
+    private var suppressChromeChangeEvents = false
+    /**
+     * Horizontal slot for composer skill picker button (left of Stop/Send).
+     * Populated once by [ensureSkillPickerWired].
+     */
+    private val composerSkillSlot = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+        isOpaque = false
     }
     private val sendButton = JButton("Send", AllIcons.Actions.Execute)
     /**
@@ -133,6 +164,25 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                 messageList.addMessage(ChatMessageListPanel.MessageRole.SYSTEM, summary)
             }
         })
+    }
+    /** Tools backend chip: MCP on / native / off — click re-probes discovery. */
+    private val toolsBadge = JBLabel("Tools …").apply {
+        font = font.deriveFont(java.awt.Font.PLAIN, 11f)
+        foreground = JBColor.GRAY
+        border = JBUI.Borders.emptyRight(6)
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        toolTipText = "Click to re-probe GoLand MCP Server (native tools always available as fallback)"
+        addMouseListener(object : java.awt.event.MouseAdapter() {
+            override fun mouseClicked(e: java.awt.event.MouseEvent?) {
+                refreshToolsBadge(forceRefresh = true, announce = true)
+            }
+        })
+    }
+    /** Opens browser OAuth help + best-effort `grok login` when session is missing/expired. */
+    private val grokLoginButton = JButton("Login…", AllIcons.General.Web).apply {
+        toolTipText = "Open Grok Build login page and start `grok login` (browser OAuth)"
+        isVisible = false
+        addActionListener { onGrokLoginClicked() }
     }
 
     private val agentCancelled = AtomicBoolean(false)
@@ -200,101 +250,157 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
             refreshUsageMeters()
         }
 
-        val topBar = JPanel(BorderLayout(0, 4)).apply {
-            add(conversationTabBar, BorderLayout.NORTH)
-
-            val controls = JPanel(FlowLayout(FlowLayout.LEFT, 8, 4)).apply {
-                add(JBLabel(AllIcons.Actions.Forward).apply {
-                    toolTipText = "Provider (Local LLM, Grok, or Gab AI)"
-                })
-                add(providerCombo)
-                add(JBLabel(AllIcons.Actions.Download).apply { toolTipText = "Model" })
-                add(modelCombo)
-                val refreshModels = JButton(AllIcons.Actions.Refresh).apply {
-                    toolTipText = "Refresh models from active provider"
-                    isBorderPainted = false
-                    preferredSize = Dimension(28, 24)
-                    addActionListener { refreshModelsFromApi() }
-                }
-                add(refreshModels)
-                add(JBLabel(AllIcons.Actions.Lightning).apply { toolTipText = "Thinking level" })
-                add(thinkingCombo)
-                add(JBLabel(AllIcons.Nodes.Toolbox).apply { toolTipText = "Guided skill — keeps prompts on rails" })
-                add(skillCombo)
-                add(skillHintLabel)
-                add(Box.createHorizontalGlue())
-                stopButton.addActionListener { onStop() }
-                add(stopButton)
+        // Compact primary toolbar: provider/model + overflow for thinking/skill (less wrap at 320–480px).
+        // Skill primary UX moves to composer in §02; keep combo as secondary chrome for now.
+        val secondaryChrome = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
+            isOpaque = false
+            isVisible = ChromeLayoutDefaults.secondaryChromeInitiallyVisible()
+            add(JBLabel(AllIcons.Actions.Lightning).apply { toolTipText = "Thinking level" })
+            add(thinkingCombo)
+            add(JBLabel(AllIcons.Nodes.Toolbox).apply {
+                toolTipText = "Guided skill (secondary) — primary: type / in composer or use skill button near Send"
+            })
+            add(skillCombo)
+            add(skillHintLabel)
+        }
+        val moreChromeButton = JButton(AllIcons.General.GearPlain).apply {
+            toolTipText = "Show thinking level and guided skill (secondary)"
+            isBorderPainted = false
+            preferredSize = Dimension(28, ChromeLayoutDefaults.TOOLBAR_CONTROL_HEIGHT)
+        }
+        moreChromeButton.addActionListener {
+            val show = !secondaryChrome.isVisible
+            secondaryChrome.isVisible = show
+            moreChromeButton.toolTipText =
+                if (show) "Hide thinking / skill row" else "Show thinking level and guided skill (secondary)"
+            secondaryChrome.revalidate()
+            (secondaryChrome.parent ?: moreChromeButton.parent)?.let {
+                it.revalidate()
+                it.repaint()
             }
-            add(controls, BorderLayout.SOUTH)
         }
 
-        val inputScroll = JBScrollPane(inputArea)
-        val inputPanel = JPanel(BorderLayout(4, 4)).apply {
+        // Cap combo preferred widths so primary row wraps less at ~320–480px.
+        providerCombo.preferredSize = Dimension(
+            ChromeLayoutDefaults.PROVIDER_COMBO_PREFERRED_WIDTH,
+            ChromeLayoutDefaults.TOOLBAR_CONTROL_HEIGHT
+        )
+        modelCombo.preferredSize = Dimension(
+            ChromeLayoutDefaults.MODEL_COMBO_PREFERRED_WIDTH,
+            ChromeLayoutDefaults.TOOLBAR_CONTROL_HEIGHT
+        )
+        val primaryControls = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
+            isOpaque = false
+            add(JBLabel(AllIcons.Actions.Forward).apply {
+                toolTipText = "Provider (Local LLM, Grok, or Gab AI)"
+            })
+            add(providerCombo)
+            add(JBLabel(AllIcons.Actions.Download).apply { toolTipText = "Model" })
+            add(modelCombo)
+            add(JButton(AllIcons.Actions.Refresh).apply {
+                toolTipText = "Refresh models from active provider"
+                isBorderPainted = false
+                preferredSize = Dimension(28, ChromeLayoutDefaults.TOOLBAR_CONTROL_HEIGHT)
+                addActionListener { refreshModelsFromApi() }
+            })
+            add(moreChromeButton)
+            add(stopButton)
+        }
+
+        val topBar = JPanel(BorderLayout(0, 2)).apply {
+            isOpaque = false
+            add(conversationTabBar, BorderLayout.NORTH)
+            val chromeStack = JPanel(BorderLayout(0, 0)).apply {
+                isOpaque = false
+                add(primaryControls, BorderLayout.NORTH)
+                add(secondaryChrome, BorderLayout.SOUTH)
+            }
+            add(chromeStack, BorderLayout.SOUTH)
+        }
+
+        // Composer: chips NORTH, full-width textarea CENTER, action strip SOUTH.
+        // Action strip must NOT sit in EAST of the textarea row — badges + Stop/Send preferred
+        // width (~500px) zeros CENTER at 320–480px tool-window widths (wo-01-01).
+        inputScroll = JBScrollPane(inputArea).apply {
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+            verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+            border = BorderFactory.createEmptyBorder()
+        }
+        val actionStrip = wrapAwareActionStrip().apply {
+            isOpaque = false
+            val frankHint = JBLabel(AllIcons.General.InspectionsOK).apply {
+                toolTipText =
+                    "Frank: articles and filler phrases are stripped from your message before sending"
+                border = JBUI.Borders.emptyRight(4)
+            }
+            add(frankHint)
+            add(toolsBadge)
+            add(sendPathBadge)
+            add(grokLoginButton)
+            // Skill picker button (slash `/` is primary; button opens the same catalog).
+            add(composerSkillSlot)
+            val stopNearSend = JButton("Stop", AllIcons.Actions.Suspend).apply {
+                toolTipText = "Stop the current agent / stream"
+                foreground = JBColor(Color(0xB00020), Color(0xFF6B6B))
+                addActionListener { onStop() }
+            }
+            stopButton.addChangeListener {
+                stopNearSend.isEnabled = stopButton.isEnabled
+            }
+            stopNearSend.isEnabled = stopButton.isEnabled
+            add(stopNearSend)
+            add(sendButton)
+        }
+        val inputPanel = JPanel(BorderLayout(4, 2)).apply {
+            isOpaque = false
             add(attachmentChipPanel, BorderLayout.NORTH)
             add(inputScroll, BorderLayout.CENTER)
-            val buttons = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
-                val frankHint = JBLabel(AllIcons.General.InspectionsOK).apply {
-                    toolTipText = "Frank: articles and filler phrases are stripped from your message before sending"
-                    border = JBUI.Borders.emptyRight(4)
-                }
-                add(frankHint)
-                add(sendPathBadge)
-                // Duplicate Stop next to Send so it is always reachable during a dump loop.
-                val stopNearSend = JButton("Stop", AllIcons.Actions.Suspend).apply {
-                    toolTipText = "Stop the current agent / stream"
-                    foreground = JBColor(Color(0xB00020), Color(0xFF6B6B))
-                    addActionListener { onStop() }
-                }
-                // Keep enabled state in sync with the header stop button.
-                stopButton.addChangeListener {
-                    stopNearSend.isEnabled = stopButton.isEnabled
-                }
-                stopNearSend.isEnabled = stopButton.isEnabled
-                add(stopNearSend)
-                sendButton.addActionListener { onSend() }
-                add(sendButton)
-            }
-            add(buttons, BorderLayout.EAST)
+            add(actionStrip, BorderLayout.SOUTH)
         }
-
+        setupComposerGrowOnDemand()
+        ensureSkillPickerWired()
+        refreshSkillCatalog()
         setupInputKeyBindings()
+        updateComposerHeight()
 
+        // Message-first CENTER: residual height → ChatMessageListPanel; log/usage stay south of it.
+        // wo-03-01 owns panel internals; parent wires collapsed default for activity log.
+        activityLogPanel.setExpanded(ChromeLayoutDefaults.ACTIVITY_LOG_DEFAULT_EXPANDED)
         val chatColumn = JPanel(BorderLayout()).apply {
+            isOpaque = false
             add(messageList, BorderLayout.CENTER)
             add(activityLogPanel, BorderLayout.SOUTH)
         }
         val center = JPanel(BorderLayout()).apply {
+            isOpaque = false
             add(chatColumn, BorderLayout.CENTER)
             add(usageMeter, BorderLayout.SOUTH)
         }
 
+        // Apply provider/model/skill selection BEFORE wiring combo listeners so we never
+        // re-enter rebuildUI mid-build (that orphaned inputScroll and hid the composer).
         val provider = settings.activeProvider
-        providerCombo.selectedItem = provider.displayName
-        usageMeter.setProvider(provider)
-        modelCombo.selectedItem = ModelCatalog.resolveSelection(
-            ModelCatalog.fallbackAsModelInfo(provider),
-            settings.getLastUsedModel(provider),
-            settings.getDefaultModel(provider),
-            provider
-        )
-        providerCombo.addActionListener { onProviderChanged() }
-        modelCombo.addActionListener {
-            val p = settings.activeProvider
-            settings.setLastUsedModel(modelCombo.selectedItem?.toString() ?: settings.getLastUsedModel(p), p)
-            refreshUsageMeters()
+        suppressChromeChangeEvents = true
+        try {
+            providerCombo.selectedItem = provider.displayName
+            usageMeter.setProvider(provider)
+            // Always reseed combo with this provider's fallbacks so a rebuild after switching
+            // from Local LLM does not leave localllm-* selected under Grok Build / Gab.
+            seedModelComboFallbacks(provider)
+            thinkingCombo.selectedItem = settings.thinkingLevel
+            syncSkillComboSelection(settings.selectedSkillId)
+            applySkillChromeFromSettings()
+        } finally {
+            suppressChromeChangeEvents = false
         }
-        thinkingCombo.selectedItem = settings.thinkingLevel
-        thinkingCombo.addActionListener {
-            settings.thinkingLevel = thinkingCombo.selectedItem?.toString() ?: "auto"
-        }
-        skillCombo.selectedItem = skillById(settings.selectedSkillId)?.name ?: SkillRegistry.all.first().name
-        skillCombo.addActionListener { onSkillChanged() }
-        onSkillChanged()
+        // Wire once after programmatic selection is stable.
+        wireMainChromeListenersOnce()
 
         refreshConversationUi()
         refreshAttachmentChips()
         refreshUsageMeters()
+        refreshSendPathBadge()
+        refreshToolsBadge(forceRefresh = false, announce = false)
         loadMessagesForActiveConversation()
 
         val workbench = if (settings.activeProvider == ModelProvider.LOCAL_LLM) {
@@ -315,15 +421,21 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                     if (q.isNotEmpty() && a.isNotEmpty()) q to a else null
                 },
                 onModeChanged = { refreshSendPathBadge() }
-            ).also { localLlmWorkbench = it }
+            ).also { wb ->
+                localLlmWorkbench = wb
+                // wo-03-01: advanced row defaults collapsed; re-assert from parent for safety.
+                wb.setAdvancedExpanded(ChromeLayoutDefaults.WORKBENCH_ADVANCED_DEFAULT_EXPANDED)
+            }
         } else {
             localLlmWorkbench = null
             null
         }
         refreshSendPathBadge()
 
-        val mainPanel = JPanel(BorderLayout(0, 8)).apply {
+        val mainPanel = JPanel(BorderLayout(0, 4)).apply {
+            isOpaque = false
             val north = JPanel(BorderLayout()).apply {
+                isOpaque = false
                 add(topBar, BorderLayout.NORTH)
                 if (workbench != null) add(workbench, BorderLayout.SOUTH)
             }
@@ -334,6 +446,164 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
         setupDragAndDrop(mainPanel, inputPanel, inputScroll, inputArea, attachmentChipPanel)
         return mainPanel
     }
+
+    /** Wire field-level chrome listeners once so rebuildUI does not stack actions. */
+    private fun wireMainChromeListenersOnce() {
+        if (mainChromeListenersWired) return
+        mainChromeListenersWired = true
+        stopButton.addActionListener { onStop() }
+        sendButton.addActionListener { onSend() }
+        providerCombo.addActionListener {
+            if (suppressChromeChangeEvents) return@addActionListener
+            onProviderChanged()
+        }
+        modelCombo.addActionListener {
+            if (suppressChromeChangeEvents) return@addActionListener
+            val p = settings.activeProvider
+            settings.setLastUsedModel(modelCombo.selectedItem?.toString() ?: settings.getLastUsedModel(p), p)
+            refreshUsageMeters()
+        }
+        thinkingCombo.addActionListener {
+            if (suppressChromeChangeEvents) return@addActionListener
+            settings.thinkingLevel = thinkingCombo.selectedItem?.toString() ?: "auto"
+        }
+        skillCombo.addActionListener {
+            if (suppressChromeChangeEvents) return@addActionListener
+            onSkillChanged()
+        }
+    }
+
+
+    /**
+     * Grow composer height with content (1–6 rows). Uses an additive [DocumentListener]
+     * so §02 can attach slash-autocomplete listeners on the same document.
+     * Wired once so [rebuildUI] does not stack listeners.
+     */
+    private fun setupComposerGrowOnDemand() {
+        if (composerGrowWired) return
+        composerGrowWired = true
+        val listener = object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent?) = scheduleComposerHeightUpdate()
+            override fun removeUpdate(e: DocumentEvent?) = scheduleComposerHeightUpdate()
+            override fun changedUpdate(e: DocumentEvent?) = scheduleComposerHeightUpdate()
+        }
+        inputArea.document.addDocumentListener(listener)
+        inputArea.addComponentListener(object : java.awt.event.ComponentAdapter() {
+            override fun componentResized(e: java.awt.event.ComponentEvent?) {
+                scheduleComposerHeightUpdate()
+            }
+        })
+    }
+
+    private fun scheduleComposerHeightUpdate() {
+        SwingUtilities.invokeLater { updateComposerHeight() }
+    }
+
+    private fun updateComposerHeight() {
+        if (!::inputScroll.isInitialized) return
+        val fm = inputArea.getFontMetrics(inputArea.font)
+        val charW = fm.charWidth('m').coerceAtLeast(1)
+        val usableW = (inputArea.width.takeIf { it > 0 }
+            ?: inputScroll.viewport.width.takeIf { it > 0 }
+            ?: (charW * ComposerLayoutMetrics.DEFAULT_COLUMNS))
+        val columns = (usableW / charW).coerceAtLeast(8)
+        val rows = ComposerLayoutMetrics.estimateRows(inputArea.text, columns)
+        inputArea.rows = rows
+        val insets = inputArea.insets
+        val viewportH = ComposerLayoutMetrics.preferredViewportHeight(
+            lineHeight = fm.height,
+            rows = rows,
+            verticalInsets = insets.top + insets.bottom + 4
+        )
+        val maxH = ComposerLayoutMetrics.preferredViewportHeight(
+            lineHeight = fm.height,
+            rows = ComposerLayoutMetrics.MAX_VISIBLE_ROWS,
+            verticalInsets = insets.top + insets.bottom + 4
+        )
+        val minH = ComposerLayoutMetrics.preferredViewportHeight(
+            lineHeight = fm.height,
+            rows = ComposerLayoutMetrics.MIN_VISIBLE_ROWS,
+            verticalInsets = insets.top + insets.bottom + 4
+        )
+        // Full-width textarea: min width keeps a usable prompt even in narrow tool windows.
+        inputScroll.minimumSize = Dimension(ComposerLayoutMetrics.MIN_USABLE_WIDTH_PX, minH)
+        inputScroll.preferredSize = Dimension(200, viewportH)
+        inputScroll.maximumSize = Dimension(Int.MAX_VALUE, maxH)
+        // Pin SOUTH shell preferred height: BorderLayout ignores minimumSize for N/S allocation.
+        val shell = inputScroll.parent
+        if (shell is JComponent) {
+            val chipsH = if (::attachmentChipPanel.isInitialized) {
+                attachmentChipPanel.preferredSize.height
+            } else {
+                0
+            }
+            val action = shell.components.firstOrNull { it !== inputScroll && it !== attachmentChipPanel }
+            val actionH = action?.preferredSize?.height
+                ?: ComposerLayoutMetrics.ACTION_STRIP_MIN_HEIGHT_PX
+            val shellMinH = minH + actionH.coerceAtLeast(ComposerLayoutMetrics.ACTION_STRIP_MIN_HEIGHT_PX) +
+                chipsH + 8
+            shell.minimumSize = Dimension(ComposerLayoutMetrics.MIN_USABLE_WIDTH_PX, shellMinH)
+            // Preferred must be set too — layout uses preferred height for SOUTH reservation.
+            val shellPrefH = viewportH + actionH.coerceAtLeast(ComposerLayoutMetrics.ACTION_STRIP_MIN_HEIGHT_PX) +
+                chipsH + 8
+            shell.preferredSize = Dimension(ComposerLayoutMetrics.MIN_USABLE_WIDTH_PX, shellPrefH)
+        }
+        inputScroll.revalidate()
+        shell?.revalidate()
+        shell?.parent?.revalidate()
+    }
+
+    /**
+     * FlowLayout action strip under the composer. Preferred height accounts for wrap at the
+     * parent width so multi-row badges do not clip when the tool window is ~320–480px wide.
+     */
+    private fun wrapAwareActionStrip(): JPanel =
+        object : JPanel(FlowLayout(FlowLayout.RIGHT, 4, 2)) {
+            override fun getPreferredSize(): Dimension {
+                val insets = insets
+                val maxInner = (parent?.width?.takeIf { it > 0 }
+                    ?: width.takeIf { it > 0 }
+                    ?: Int.MAX_VALUE)
+                    .let { it - insets.left - insets.right }
+                    .coerceAtLeast(1)
+                val hgap = 4
+                val vgap = 2
+                var rowW = 0
+                var rowH = 0
+                var totalH = 0
+                var completedRows = 0
+                var maxRowW = 0
+                for (i in 0 until componentCount) {
+                    val c = getComponent(i)
+                    if (!c.isVisible) continue
+                    val d = c.preferredSize
+                    val next = if (rowW == 0) d.width else rowW + hgap + d.width
+                    if (rowW > 0 && next > maxInner) {
+                        totalH += rowH + if (completedRows > 0) vgap else 0
+                        maxRowW = maxOf(maxRowW, rowW)
+                        completedRows++
+                        rowW = d.width
+                        rowH = d.height
+                    } else {
+                        rowW = next
+                        rowH = maxOf(rowH, d.height)
+                    }
+                }
+                if (rowH > 0) {
+                    totalH += rowH + if (completedRows > 0) vgap else 0
+                    maxRowW = maxOf(maxRowW, rowW)
+                }
+                if (totalH <= 0) {
+                    totalH = ComposerLayoutMetrics.ACTION_STRIP_MIN_HEIGHT_PX
+                }
+                val prefW = maxRowW + insets.left + insets.right
+                val prefH = totalH + insets.top + insets.bottom
+                return Dimension(prefW.coerceAtLeast(1), prefH)
+            }
+
+            override fun getMinimumSize(): Dimension =
+                Dimension(ComposerLayoutMetrics.MIN_USABLE_WIDTH_PX, ComposerLayoutMetrics.ACTION_STRIP_MIN_HEIGHT_PX)
+        }
 
     private fun onProviderChanged() {
         val selected = providerCombo.selectedItem?.toString() ?: return
@@ -382,6 +652,8 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
             ModelProvider.GROK_BUILD -> {
                 val session = GrokBuildAuth.readSession()
                 val state = GrokBuildAuthRecovery.classifySession(session)
+                val hasOverride = !settings.grokBuildAccessToken().isNullOrBlank() &&
+                    state != GrokBuildAuthRecovery.SessionState.USABLE
                 sendPathBadge.isVisible = true
                 sendPathBadge.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                 when (state) {
@@ -391,19 +663,39 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                         sendPathBadge.toolTipText =
                             "${settings.grokBuildSessionSummary()} — click to re-read session after `grok login`"
                         sendPathBadge.foreground = JBColor(0x34D399, 0x34D399)
+                        grokLoginButton.isVisible = false
                     }
                     GrokBuildAuthRecovery.SessionState.EXPIRED -> {
-                        sendPathBadge.text = "Session expired"
-                        sendPathBadge.toolTipText =
-                            GrokBuildSendUx.coachingExpiredSession(email = session?.email) +
-                                " — click to re-check after login"
-                        sendPathBadge.foreground = JBColor(0xF59E0B, 0xF59E0B)
+                        grokLoginButton.isVisible = true
+                        if (hasOverride) {
+                            sendPathBadge.text = "Session expired · override"
+                            sendPathBadge.toolTipText =
+                                GrokBuildSendUx.coachingExpiredSession(email = session?.email) +
+                                    " PasswordSafe override may still send — prefer Login…. Click badge to re-check."
+                            sendPathBadge.foreground = JBColor(0xF59E0B, 0xF59E0B)
+                        } else {
+                            sendPathBadge.text = "Session expired"
+                            sendPathBadge.toolTipText =
+                                GrokBuildSendUx.coachingExpiredSession(email = session?.email) +
+                                    " — use Login… to open the browser OAuth page"
+                            sendPathBadge.foreground = JBColor(0xF59E0B, 0xF59E0B)
+                        }
                     }
                     GrokBuildAuthRecovery.SessionState.MISSING -> {
-                        sendPathBadge.text = "No session"
-                        sendPathBadge.toolTipText =
-                            GrokBuildSendUx.coachingMissingSession() + " — click to re-check after login"
-                        sendPathBadge.foreground = JBColor(0xB00020, 0xFF6B6B)
+                        grokLoginButton.isVisible = true
+                        if (hasOverride) {
+                            sendPathBadge.text = "Override token"
+                            sendPathBadge.toolTipText =
+                                "No live ~/.grok/auth.json session — using PasswordSafe override. " +
+                                    "Prefer Login…. Click badge to re-check."
+                            sendPathBadge.foreground = JBColor(0xF59E0B, 0xF59E0B)
+                        } else {
+                            sendPathBadge.text = "No session"
+                            sendPathBadge.toolTipText =
+                                GrokBuildSendUx.coachingMissingSession() +
+                                    " — use Login… to open the browser OAuth page"
+                            sendPathBadge.foreground = JBColor(0xB00020, 0xFF6B6B)
+                        }
                     }
                 }
             }
@@ -412,8 +704,77 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                 sendPathBadge.toolTipText = null
                 sendPathBadge.isVisible = false
                 sendPathBadge.cursor = Cursor.getDefaultCursor()
+                grokLoginButton.isVisible = false
             }
         }
+    }
+
+    private fun onGrokLoginClicked() {
+        val result = GrokLoginActions.openLoginFlow()
+        sessionLog.system(
+            "grok login action: browser=${result.browserOpened} process=${result.processStarted}"
+        )
+        messageList.addMessage(ChatMessageListPanel.MessageRole.SYSTEM, result.message)
+        // Re-check after a short delay so a completed OAuth can update the badge.
+        Thread {
+            Thread.sleep(2500)
+            SwingUtilities.invokeLater {
+                settings.refreshGrokBuildSession()
+                refreshSendPathBadge()
+            }
+        }.start()
+    }
+
+    private fun refreshToolsBadge(forceRefresh: Boolean, announce: Boolean) {
+        Thread {
+            try {
+                if (forceRefresh) {
+                    com.waryway.gab.tools.GolandMcpClient.clearDiscoveryCache()
+                }
+                val executor = com.waryway.gab.tools.GolandMcpExecutor(project, settings)
+                val probe = executor.probeMcp(forceRefresh = forceRefresh)
+                SwingUtilities.invokeLater {
+                    when (probe.status) {
+                        com.waryway.gab.tools.GolandMcpClient.ProbeStatus.AVAILABLE -> {
+                            toolsBadge.text = "Tools · MCP"
+                            toolsBadge.foreground = JBColor(0x34D399, 0x34D399)
+                            toolsBadge.toolTipText =
+                                "MCP Server reachable at ${probe.endpoint?.baseUrl}. Click to re-probe."
+                        }
+                        com.waryway.gab.tools.GolandMcpClient.ProbeStatus.IDE_UP_MCP_OFF -> {
+                            toolsBadge.text = "Tools · native"
+                            toolsBadge.foreground = JBColor(0xF59E0B, 0xF59E0B)
+                            toolsBadge.toolTipText =
+                                (probe.detail ?: "IDE up; MCP HTTP off") +
+                                    " Core tools run in-process. Click to re-probe."
+                        }
+                        com.waryway.gab.tools.GolandMcpClient.ProbeStatus.UNREACHABLE -> {
+                            toolsBadge.text = "Tools · native"
+                            toolsBadge.foreground = JBColor(0xF59E0B, 0xF59E0B)
+                            toolsBadge.toolTipText =
+                                (probe.detail ?: "MCP unreachable") +
+                                    " Core tools run in-process. Click to re-probe."
+                        }
+                    }
+                    if (announce) {
+                        val msg = probe.detail ?: "Tools backend: ${executor.backendLabel()}"
+                        sessionLog.system("tools probe: ${probe.status} ${probe.endpoint?.baseUrl.orEmpty()}")
+                        messageList.addMessage(ChatMessageListPanel.MessageRole.SYSTEM, msg)
+                    }
+                }
+            } catch (e: Exception) {
+                SwingUtilities.invokeLater {
+                    toolsBadge.text = "Tools · ?"
+                    toolsBadge.foreground = JBColor.GRAY
+                    if (announce) {
+                        messageList.addMessage(
+                            ChatMessageListPanel.MessageRole.SYSTEM,
+                            "Tools probe failed: ${e.message}"
+                        )
+                    }
+                }
+            }
+        }.start()
     }
 
     /**
@@ -446,7 +807,11 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
         }
     }
 
-    /** Enter sends; Shift+Enter or Ctrl+Enter inserts a newline. */
+    /**
+     * Enter sends; Shift+Enter or Ctrl+Enter inserts a newline.
+     * When the skill slash/picker popup is open: Enter/Tab select, Esc closes, ↑/↓ navigate —
+     * never auto-send from a skill selection.
+     */
     private fun setupInputKeyBindings() {
         val inputMap = inputArea.getInputMap(JComponent.WHEN_FOCUSED)
         val actionMap = inputArea.actionMap
@@ -461,9 +826,88 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
 
         actionMap.put("send-message", object : AbstractAction() {
             override fun actionPerformed(e: java.awt.event.ActionEvent?) {
+                if (::skillPicker.isInitialized && skillPicker.tryAcceptSelection()) return
                 if (inputArea.text.isNotBlank()) onSend()
             }
         })
+    }
+
+    /**
+     * Discover skills (bundled + `~/.grok/skills` + project `.grok/skills`) and refresh
+     * the secondary skill combo model. Safe to call on each main-panel rebuild.
+     */
+    private fun refreshSkillCatalog() {
+        skillCatalog = SkillCatalog.discover(projectBasePath = project.basePath)
+        val labels = skillCatalog.map { SkillSlashQuery.comboLabel(it) }.toTypedArray()
+        val previousId = settings.selectedSkillId
+        skillCombo.model = DefaultComboBoxModel(labels)
+        syncSkillComboSelection(previousId)
+    }
+
+    private fun syncSkillComboSelection(skillId: String?) {
+        if (skillCatalog.isEmpty()) return
+        val idx = skillCatalog.indexOfFirst { it.id == skillId }
+            .takeIf { it >= 0 }
+            ?: skillCatalog.indexOfFirst { it.isNone }.takeIf { it >= 0 }
+            ?: 0
+        skillCombo.selectedIndex = idx
+    }
+
+    /** Wire slash autocomplete + picker button once (fields outlive [rebuildUI]). */
+    private fun ensureSkillPickerWired() {
+        if (skillPickerWired) return
+        skillPickerWired = true
+        skillCatalog = SkillCatalog.discover(projectBasePath = project.basePath)
+        skillPicker = ComposerSkillPicker(
+            textArea = inputArea,
+            getCatalog = {
+                // Cheap re-scan on open so new FS skills appear without restart
+                skillCatalog = SkillCatalog.discover(projectBasePath = project.basePath)
+                skillCatalog
+            },
+            onSkillSelected = { applyComposerSkillSelection(it) }
+        )
+        skillPicker.wire()
+        inputArea.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (!::skillPicker.isInitialized) return
+                skillPicker.tryHandleKey(e)
+            }
+        })
+        composerSkillSlot.removeAll()
+        composerSkillSlot.add(skillPicker.createPickerButton())
+        composerSkillSlot.revalidate()
+    }
+
+    /**
+     * Apply a skill chosen from slash popup or picker button.
+     * Sets [WarywayGabSettings.selectedSkillId], syncs secondary combo; does **not** send.
+     */
+    private fun applyComposerSkillSelection(skill: SkillRef) {
+        settings.selectedSkillId = skill.id
+        // Avoid recursive onSkillChanged side effects fighting the index we set
+        val listeners = skillCombo.actionListeners.toList()
+        listeners.forEach { skillCombo.removeActionListener(it) }
+        try {
+            // Ensure combo model knows this skill (catalog may have been re-scanned)
+            if (skillCatalog.none { it.id == skill.id }) {
+                skillCatalog = SkillCatalog.discover(projectBasePath = project.basePath)
+                skillCombo.model = DefaultComboBoxModel(
+                    skillCatalog.map { SkillSlashQuery.comboLabel(it) }.toTypedArray()
+                )
+            }
+            syncSkillComboSelection(skill.id)
+        } finally {
+            listeners.forEach { skillCombo.addActionListener(it) }
+        }
+        skillHintLabel.text = skill.hint.ifBlank { skill.description }
+        inputArea.toolTipText = when {
+            skill.isNone -> "Enter to send · / for skills · Shift+Enter newline"
+            else -> "Skill: ${skill.id} — ${skill.hint.ifBlank { skill.description }.ifBlank { skill.name }}"
+        }
+        if (settings.activeProvider == ModelProvider.LOCAL_LLM) {
+            skill.localLlmPreset?.let { settings.localLlmPreset = it }
+        }
     }
 
     /** IntelliJ DnD manager handles in-IDE drags; AWT DropTarget only sees OS-level file drops. */
@@ -599,8 +1043,30 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
         settings.setLastUsedModel(selection, provider)
     }
 
+    /** Seed model dropdown with provider-specific fallbacks (before async listModels). */
+    private fun seedModelComboFallbacks(provider: ModelProvider) {
+        val fallbacks = ModelCatalog.fallbackAsModelInfo(provider)
+        loadedModels = fallbacks
+        val selection = ModelCatalog.resolveSelection(
+            fallbacks,
+            settings.getLastUsedModel(provider),
+            settings.getDefaultModel(provider),
+            provider
+        )
+        modelCombo.removeAllItems()
+        fallbacks.forEach { modelCombo.addItem(it.id) }
+        modelCombo.selectedItem = selection
+        settings.setLastUsedModel(selection, provider)
+    }
+
     private fun refreshAccountInfo(provider: ModelProvider = settings.activeProvider) {
-        if (!settings.hasApiKey(provider)) return
+        if (!settings.hasApiKey(provider)) {
+            // Still ensure the combo matches this provider's catalog (e.g. after switch).
+            SwingUtilities.invokeLater {
+                if (provider == settings.activeProvider) seedModelComboFallbacks(provider)
+            }
+            return
+        }
         Thread {
             try {
                 val client = settings.createClient(provider, sessionLog)
@@ -610,11 +1076,25 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                     if (provider != settings.activeProvider) return@invokeLater
                     creditsInfo = credits
                     usageMeter.setProvider(provider)
-                    if (models.isNotEmpty()) applyModelsToCombo(models, provider)
+                    if (models.isNotEmpty()) {
+                        applyModelsToCombo(models, provider)
+                    } else {
+                        seedModelComboFallbacks(provider)
+                    }
                     refreshUsageMeters()
                 }
-            } catch (_: Exception) {
-                // Credits endpoint may be unavailable; meters show placeholders
+            } catch (e: Exception) {
+                val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                sessionLog.system(
+                    "model refresh failed for ${provider.displayName}: $detail — using fallbacks"
+                )
+                SwingUtilities.invokeLater {
+                    if (provider != settings.activeProvider) return@invokeLater
+                    // Always keep a usable model combo when offline — never leave empty.
+                    seedModelComboFallbacks(provider)
+                    usageMeter.setProvider(provider)
+                    refreshUsageMeters()
+                }
             }
         }.start()
     }
@@ -655,18 +1135,46 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
             contentType = "text/html"
             isEditable = false
             alignmentX = Component.LEFT_ALIGNMENT
-            updateCoachingSteps(settings.activeProvider)
+            putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, true)
+        }
+        // Single hyperlink listener — updateCoachingSteps must not stack listeners.
+        stepsPane.addHyperlinkListener { e ->
+            if (e.eventType == javax.swing.event.HyperlinkEvent.EventType.ACTIVATED) {
+                val url = e.url?.toString() ?: e.description
+                if (!url.isNullOrBlank()) {
+                    GrokLoginActions.openUrl(url)
+                }
+            }
         }
         val pasteLabel = JBLabel().apply {
             alignmentX = Component.LEFT_ALIGNMENT
             text = coachingPasteLabel(settings.activeProvider)
         }
+        stepsPane.updateCoachingSteps(settings.activeProvider)
         providerSelector.addActionListener {
             val provider = ModelProvider.selectable[providerSelector.selectedIndex]
             stepsPane.updateCoachingSteps(provider)
             pasteLabel.text = coachingPasteLabel(provider)
         }
         outer.add(stepsPane)
+        outer.add(Box.createVerticalStrut(8))
+        val coachingLoginRow = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(JButton("Open Grok Login page", AllIcons.General.Web).apply {
+                toolTipText = "Open browser OAuth help and start `grok login`"
+                addActionListener {
+                    val result = GrokLoginActions.openLoginFlow()
+                    JOptionPane.showMessageDialog(this, result.message)
+                }
+            })
+            add(JButton("Open gab.ai", AllIcons.General.Web).apply {
+                addActionListener { GrokLoginActions.openUrl(ModelProvider.GAB_AI.keyHelpUrl) }
+            })
+            add(JButton("Open console.x.ai", AllIcons.General.Web).apply {
+                addActionListener { GrokLoginActions.openUrl(ModelProvider.GROK.keyHelpUrl) }
+            })
+        }
+        outer.add(coachingLoginRow)
         outer.add(Box.createVerticalStrut(16))
         outer.add(pasteLabel)
 
@@ -788,13 +1296,13 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                 "1. In the stack repo, run <b>scripts\\localllm-run.bat</b> (or <code>bazel run //apps/localllm:localllm-dev</code>)",
                 "2. Wait for <a href='http://127.0.0.1:7400/healthz'>http://127.0.0.1:7400/healthz</a> to return ready",
                 "3. Click <b>Use Local LLM</b> below — no cloud API key required",
-                "4. IDE tools (read_file, search, edit, build) work via the plugin; model runs offline"
+                "4. IDE tools (read_file, search, edit, build) run in-process (MCP optional)"
             )
             ModelProvider.GROK_BUILD -> listOf(
-                "1. Install/use Grok Build CLI and run <code>grok login</code> (browser OAuth)",
-                "2. Session is stored at <code>~/.grok/auth.json</code> — same login as GoLand AI Chat Grok Build",
+                "1. Click <b>Open Grok Login page</b> below (or run <code>grok login</code>) — browser OAuth",
+                "2. Docs: <a href='https://x.ai/cli'>https://x.ai/cli</a> — session at <code>~/.grok/auth.json</code>",
                 "3. Click <b>Use Grok Build</b> below — no console.x.ai API key or team credits required",
-                "4. Status: ${settings.grokBuildSessionSummary().replace("<", "&lt;")}"
+                "4. Status: ${settings.grokBuildSessionSummary().replace("<", "&lt;").replace(">", "&gt;")}"
             )
             ModelProvider.GROK -> listOf(
                 "1. Go to <a href='https://console.x.ai'>https://console.x.ai</a> and sign in (xAI Grok API)",
@@ -809,14 +1317,8 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                 "4. Generate a new API key and paste it below — separate from Grok credentials"
             )
         }
-        text = "<html><body style='font-family:sans-serif;font-size:12pt'>" + steps.joinToString("<br/>") + "</body></html>"
-        addHyperlinkListener { e ->
-            if (e.eventType == javax.swing.event.HyperlinkEvent.EventType.ACTIVATED) {
-                try {
-                    com.intellij.ide.BrowserUtil.browse(e.url?.toString() ?: provider.keyHelpUrl)
-                } catch (_: Exception) {}
-            }
-        }
+        text = "<html><body style='font-family:sans-serif;font-size:12pt'>" +
+            steps.joinToString("<br/>") + "</body></html>"
     }
 
     private fun coachingPasteLabel(provider: ModelProvider): String = when (provider) {
@@ -862,12 +1364,47 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
     private fun skillById(id: String): SkillRegistry.GuidedSkill? =
         SkillRegistry.all.find { it.id == id }
 
+    /** Active catalog entry from secondary combo index or [WarywayGabSettings.selectedSkillId]. */
+    private fun selectedSkillRef(): SkillRef? {
+        val idx = skillCombo.selectedIndex
+        if (idx >= 0 && idx < skillCatalog.size) return skillCatalog[idx]
+        return SkillCatalog.find(skillCatalog, settings.selectedSkillId)
+            ?: skillCatalog.find { it.id == settings.selectedSkillId }
+            ?: skillCatalog.firstOrNull { it.isNone }
+    }
+
+    /**
+     * Bundled guided skill for legacy callers; send path uses [settings.selectedSkillId]
+     * via [SkillSendInjection]. FS-only skills return null here.
+     */
     private fun selectedSkill(): SkillRegistry.GuidedSkill? {
-        val name = skillCombo.selectedItem?.toString() ?: return null
-        return SkillRegistry.all.find { it.name == name }
+        val id = selectedSkillRef()?.id ?: settings.selectedSkillId
+        return SkillRegistry.all.find { it.id == id }
     }
 
     private fun onSkillChanged() {
+        applySkillChromeFromSettings()
+    }
+
+    /**
+     * Sync skill hint / Local LLM preset from current combo selection without sending.
+     * Safe during programmatic combo setup (no rebuild side effects).
+     */
+    private fun applySkillChromeFromSettings() {
+        val ref = selectedSkillRef()
+        if (ref != null) {
+            // Avoid nested suppress / combo rewrites when already selected by index.
+            settings.selectedSkillId = ref.id
+            skillHintLabel.text = ref.hint.ifBlank { ref.description }
+            inputArea.toolTipText = when {
+                ref.isNone -> "Enter to send · / for skills · Shift+Enter newline"
+                else -> "Skill: ${ref.id} — ${ref.hint.ifBlank { ref.description }.ifBlank { ref.name }}"
+            }
+            if (settings.activeProvider == ModelProvider.LOCAL_LLM) {
+                ref.localLlmPreset?.let { settings.localLlmPreset = it }
+            }
+            return
+        }
         val skill = selectedSkill() ?: return
         settings.selectedSkillId = skill.id
         skillHintLabel.text = skill.hint
@@ -887,27 +1424,33 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
             return
         }
 
-        val normalizedText = InputNormalizer.normalize(rawText)
-        if (normalizedText.isEmpty()) {
+        // Frank normalizes user text only; SkillCatalog injects [skill:id]+body after (not stripped).
+        // settings.selectedSkillId is SoT (top-bar combo + composer slash both write it).
+        // Prefer in-memory catalog from §02 picker refresh; fall back to discover on cold send.
+        val prepared = if (skillCatalog.isNotEmpty()) {
+            SkillSendInjection.prepare(
+                rawComposerText = rawText,
+                skillId = settings.selectedSkillId,
+                skills = skillCatalog
+            )
+        } else {
+            SkillSendInjection.prepareWithDiscovery(
+                rawComposerText = rawText,
+                skillId = settings.selectedSkillId,
+                projectBasePath = project.basePath
+            )
+        }
+        if (prepared.isEmpty) {
             sendInFlight.set(false)
             JOptionPane.showMessageDialog(this, "Message is empty after Frank compression. Add more substance.")
             return
         }
 
-        val skill = selectedSkill()
-        val guidedText = SkillRegistry.apply(skill, normalizedText)
-        val payload = buildMessagePayload(guidedText)
-        lastUserQuestion = normalizedText
+        // Payload is authoritative for the model; display bubble stays short.
+        val payload = buildMessagePayload(prepared.outboundText)
+        lastUserQuestion = prepared.normalizedUser
         lastAssistantAnswer = ""
-        val displayText = buildString {
-            if (skill != null && skill.id != "none") {
-                append("[${skill.name}] ")
-            }
-            append(normalizedText)
-            if (normalizedText != rawText) {
-                append("\n\n(frank: ${rawText.length - normalizedText.length} chars removed)")
-            }
-        }
+        val displayText = SkillSendInjection.displayText(prepared, rawText)
 
         val conv = conversationManager.getActive()
         val userMsg = ChatMessage(ChatMessage.Role.user, payload)
@@ -958,14 +1501,15 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
             provider.displayName
         }
         lastSendModel = model
-        lastSendSkillId = skill?.id ?: "none"
+        lastSendSkillId = prepared.skillId
         lastSendPathLabel = pathLabel
         errMirrorCount.set(0)
-        sessionLog.system("send: model=$model skill=${skill?.id ?: "none"} path=$pathLabel")
+        sessionLog.system("send: model=$model skill=${prepared.skillId} path=$pathLabel")
         refreshSendPathBadge()
 
         if (useLocalAgent) {
-            runLocalLlmAgent(conv, payload, model, skill)
+            // userPayload already carries skill-injected text; goal reuses buildGoalWithAttachments.
+            runLocalLlmAgent(conv, payload, model, prepared.skillId)
             return
         }
 
@@ -991,7 +1535,8 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                 val client = settings.createClient(provider, sessionLog)
                 activeGabClient.set(client)
                 val preset = when {
-                    provider == ModelProvider.LOCAL_LLM -> skill?.localLlmPreset ?: settings.localLlmPreset
+                    provider == ModelProvider.LOCAL_LLM ->
+                        prepared.localLlmPreset ?: settings.localLlmPreset
                     else -> null
                 }
                 val session = AgentSession(
@@ -1003,6 +1548,12 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                             // Status lines should show promptly; flush any pending stream text first.
                             flushStreamCoalescerToUi()
                             messageList.appendToAgentTurn(status)
+                        }
+                    },
+                    onCommandOutput = { command, output ->
+                        SwingUtilities.invokeLater {
+                            flushStreamCoalescerToUi()
+                            messageList.appendCommandOutput(command, output)
                         }
                     },
                     onStreamStart = {
@@ -1040,14 +1591,20 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                     "history sync: persisted ${toPersist.size} message(s) " +
                         "(roles=${toPersist.joinToString { it.role.name }})"
                 )
-                // Auto-export when the agent hit a hard stop / empty / length style terminal.
+                // Auto-export when the agent hit a hard stop / empty / length / timeout terminal.
                 val content = result.finalContent
+                val isTimeoutTerminal =
+                    content.contains("timed out", ignoreCase = true) ||
+                        content.contains("partial reply kept", ignoreCase = true) ||
+                        content.contains("session budget", ignoreCase = true)
                 if (agentCancelled.get() || content.contains("Stopped by user") ||
-                    content.contains("stopped after") || content.contains("empty or incomplete")
+                    content.contains("stopped after") || content.contains("empty or incomplete") ||
+                    isTimeoutTerminal
                 ) {
                     val trigger = when {
                         agentCancelled.get() || content.contains("Stopped by user") -> "user_stop"
                         content.contains("stopped after") -> "max_iterations"
+                        isTimeoutTerminal -> "agent_timeout"
                         else -> "agent_terminal"
                     }
                     writeFailPackageInternal(trigger, content.take(200))
@@ -1121,17 +1678,21 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
      * Local LLM agent path: [AgentClient] start + poll. Surfaces state/plan/events/finalAnswer
      * and dryRun/repoRoot badges. Does not use [AgentSession].
      *
-     * Goal = chat payload (path + content or read_file instruction) + path list from
+     * [userPayload] must already include skill injection from [SkillSendInjection] /
+     * [com.waryway.gab.skills.SkillCatalog.apply] (`[skill:id]` + body + user) via
+     * [buildMessagePayload]. Goal = that payload + path list from
      * [lastAttachmentPathsForAgent] captured at Send before clearAttachments.
+     * Reuses [LocalLlmAgentSession.buildGoalWithAttachments] — no AgentClient rewrite.
      */
     private fun runLocalLlmAgent(
         conv: Conversation,
         userPayload: String,
         model: String,
-        skill: SkillRegistry.GuidedSkill?
+        skillId: String
     ) {
         // Snapshot field once so background thread cannot race a later Send.
         val pathsForGoal = lastAttachmentPathsForAgent.toList()
+        // Skill context is already inside userPayload; only append attachment path list.
         val goal = LocalLlmAgentSession.buildGoalWithAttachments(userPayload, pathsForGoal)
         val dryRun = resolveAgentDryRun()
         val preset = settings.localLlmAgentPreset.ifBlank { "agent-plan" }
@@ -1140,7 +1701,7 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
         val pathLabel = LocalLlmSendUx.sendPathLabel(agentMode = true, dryRun = dryRun)
         sessionLog.system(
             "local agent: dryRun=$dryRun preset=$preset model=$model " +
-                "skill=${skill?.id ?: "none"} paths=${pathsForGoal.size} " +
+                "skill=$skillId paths=${pathsForGoal.size} " +
                 "pathList=${pathsForGoal.joinToString(limit = 8)} sendPath=$pathLabel"
         )
         localLlmWorkbench?.updateRunMeta(dryRun, null)
@@ -1169,6 +1730,8 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                 }
 
                 val agentClient = AgentClient(settings = settings, sessionLog = sessionLog)
+                val agentTimeoutMs =
+                    settings.localLlmAgentTimeoutMinutes.coerceIn(5, 120) * 60L * 1000L
                 val session = LocalLlmAgentSession(
                     client = agentClient,
                     sessionLog = sessionLog,
@@ -1176,11 +1739,19 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                         SwingUtilities.invokeLater { messageList.appendToAgentTurn(status) }
                     },
                     onLogLine = { line ->
-                        // Always keep full detail in Activity log; chat is soft-capped.
+                        // Short status only; large tool_result bodies go to collapsible + session log.
                         sessionLog.system(line)
                         SwingUtilities.invokeLater { messageList.appendToAgentTurn(line) }
                     },
-                    cancelled = agentCancelled
+                    onCommandOutput = { command, output ->
+                        // Full body already logged by LocalLlmAgentSession (soft-capped).
+                        // Chat timeline: collapsed-by-default panel (same as Grok AgentSession path).
+                        SwingUtilities.invokeLater {
+                            messageList.appendCommandOutput(command, output)
+                        }
+                    },
+                    cancelled = agentCancelled,
+                    timeoutMs = agentTimeoutMs
                 )
                 activeLocalAgent.set(session)
                 val result = session.run(
@@ -1206,7 +1777,15 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                 }
                 SwingUtilities.invokeLater {
                     lastAssistantAnswer = result.finalContent
-                    messageList.completeAgentTurn(result.finalContent, result.toolCallCount)
+                    // Prefer structured answer + collapsible thinking when available.
+                    val answerBody = result.displayAnswer?.takeIf { it.isNotBlank() }
+                        ?: result.finalContent
+                    messageList.completeAgentTurn(
+                        response = answerBody,
+                        toolCallCount = result.toolCallCount,
+                        thinking = result.displayThinking,
+                        fullCopyText = result.finalContent,
+                    )
                     localLlmWorkbench?.updateRunMeta(result.run.dryRun, result.run.repoRoot)
                     localLlmWorkbench?.refreshStatus()
                     refreshUsageMeters()
@@ -1329,9 +1908,10 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
         // Capture fail package while logs still include this turn.
         val path = writeFailPackageInternal("user_stop", "Stopped by user")
         stopButton.isEnabled = false
-        sendButton.isEnabled = true
-        // Allow a new send after stop; the in-flight thread clears sendInFlight in finally too.
-        sendInFlight.set(false)
+        // Keep sendInFlight true until the worker's finally — a new Send that resets
+        // agentCancelled while the old thread still runs would "un-cancel" Grok Build /
+        // Local LLM mid-stream. Worker finally re-enables Send.
+        sendButton.isEnabled = false
         // Flush any batched stream text so partial reply is visible, then cancel timer.
         stopStreamFlushTimerOnEdt(flush = true)
         messageList.appendToAgentTurn("Stopping agent…" + failPathNote(path))
@@ -1473,9 +2053,19 @@ class WarywayGabToolWindowPanel(private val project: Project) : JBPanel<WarywayG
                     )
                 }
             } catch (e: Exception) {
-                sessionLog.error("model refresh failed: ${e.message}")
+                val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                sessionLog.error("model refresh failed: $detail")
                 SwingUtilities.invokeLater {
-                    messageList.addMessage(ChatMessageListPanel.MessageRole.SYSTEM, "Failed to load models: ${e.message}")
+                    seedModelComboFallbacks(provider)
+                    val offlineHint = if (provider == ModelProvider.LOCAL_LLM) {
+                        " Using catalog fallbacks — start LocalLLM to refresh live models."
+                    } else {
+                        " Using catalog fallbacks."
+                    }
+                    messageList.addMessage(
+                        ChatMessageListPanel.MessageRole.SYSTEM,
+                        "Failed to load models: $detail.$offlineHint"
+                    )
                 }
             } finally {
                 SwingUtilities.invokeLater { sendButton.isEnabled = true }
